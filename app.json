@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "PWRLFTNG",
+    "slug": "pwrlftng-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "pwrlftng",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}

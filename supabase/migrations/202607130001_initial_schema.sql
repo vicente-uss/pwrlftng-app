@@ -1,6 +1,9 @@
 create extension if not exists pgcrypto;
 
-create or replace function public.set_updated_at()
+create schema if not exists private;
+revoke all on schema private from public, anon, authenticated;
+
+create or replace function private.set_updated_at()
 returns trigger
 language plpgsql
 security invoker
@@ -109,12 +112,16 @@ create table public.workout_sets (
 create index routines_user_id_idx on public.routines(user_id);
 create index workouts_user_completed_idx on public.workouts(user_id, completed_at desc);
 create index routine_exercises_routine_idx on public.routine_exercises(routine_id);
+create index routine_exercises_user_id_idx on public.routine_exercises(user_id);
+create index routine_sets_user_id_idx on public.routine_sets(user_id);
 create index workout_exercises_workout_idx on public.workout_exercises(workout_id);
+create index workout_exercises_user_id_idx on public.workout_exercises(user_id);
+create index workout_sets_user_id_idx on public.workout_sets(user_id);
 
-create trigger profiles_set_updated_at before update on public.profiles for each row execute function public.set_updated_at();
-create trigger routines_set_updated_at before update on public.routines for each row execute function public.set_updated_at();
+create trigger profiles_set_updated_at before update on public.profiles for each row execute function private.set_updated_at();
+create trigger routines_set_updated_at before update on public.routines for each row execute function private.set_updated_at();
 
-create or replace function public.handle_new_user()
+create or replace function private.handle_new_user()
 returns trigger
 language plpgsql
 security definer
@@ -128,7 +135,10 @@ $$;
 
 create trigger on_auth_user_created
   after insert on auth.users
-  for each row execute function public.handle_new_user();
+  for each row execute function private.handle_new_user();
+
+revoke execute on function private.set_updated_at() from public, anon, authenticated;
+revoke execute on function private.handle_new_user() from public, anon, authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.exercises enable row level security;
@@ -150,6 +160,16 @@ create policy "routine_sets_all_own" on public.routine_sets for all to authentic
 create policy "workouts_all_own" on public.workouts for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 create policy "workout_exercises_all_own" on public.workout_exercises for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 create policy "workout_sets_all_own" on public.workout_sets for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+
+grant usage on schema public to authenticated;
+grant select, insert, update on public.profiles to authenticated;
+grant select on public.exercises to authenticated;
+grant select, insert, update on public.routines to authenticated;
+grant select, insert, update on public.routine_exercises to authenticated;
+grant select, insert, update on public.routine_sets to authenticated;
+grant select, insert, update on public.workouts to authenticated;
+grant select, insert, update on public.workout_exercises to authenticated;
+grant select, insert, update on public.workout_sets to authenticated;
 
 insert into public.exercises (id, name, muscle) values
   ('squat', 'Squat', 'Piernas'),

@@ -20,4 +20,4 @@ export const SEED_ROUTINES: Routine[] = [
 
 const historicalExercises = SEED_ROUTINES[2].exercises.map(exercise => ({ ...exercise, sets: exercise.sets.map(set => ({ ...set, weight: String(set.weight), reps: String(set.reps), rpe: set.rpe ? String(set.rpe) : '', completed: true, completedAt: now })) }));
 export const SEED_HISTORY: WorkoutHistory[] = [{ id: 'history-demo', routineName: 'Día C · Peso muerto', date: new Date(Date.now() - 3 * 86400000).toISOString(), durationSeconds: 3840, totalVolume: 8540, setsCompleted: 10, exercises: historicalExercises }];
-export const DEFAULT_DATA: PersistedData = { routines: SEED_ROUTINES, history: SEED_HISTORY, profile: { bodyWeight: '85', height: '178', goal: 'Fuerza máxima', level: 'Intermedio', defaultRestSeconds: 180 } };
+export const DEFAULT_DATA: PersistedData = { routines: SEED_ROUTINES, history: SEED_HISTORY, profile: { bodyWeight: '85', height: '178', goal: 'Fuerza máxima', level: 'Intermedio', defaultRestSeconds: 180, updatedAt: now }, tombstones: [] };

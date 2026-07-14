@@ -21,7 +21,8 @@ export type WorkoutHistory = {
   exercises: ActiveExercise[];
 };
 
-export type Profile = { bodyWeight: string; height: string; goal: string; level: string; defaultRestSeconds: number };
-export type PersistedData = { routines: Routine[]; history: WorkoutHistory[]; profile: Profile };
+export type Profile = { bodyWeight: string; height: string; goal: string; level: string; defaultRestSeconds: number; updatedAt: string };
+export type DeletionTombstone = { entityType: 'routine'; recordId: string; deletedAt: string };
+export type PersistedData = { routines: Routine[]; history: WorkoutHistory[]; profile: Profile; tombstones: DeletionTombstone[] };
 
 export const makeId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

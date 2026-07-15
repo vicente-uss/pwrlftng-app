@@ -1,0 +1,71 @@
+import { useMemo, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Card, PrimaryButton, TopBar, formatDate } from '@/src/components/ui';
+import { Profile } from '@/src/domain/types';
+import { useAppStore } from '@/src/store/AppStore';
+import { colors, condensed } from '@/src/theme';
+
+export function HistoryScreen({ onBack }: { onBack(): void }) {
+  const { history } = useAppStore();
+  const records = useMemo(() => {
+    const map = new Map<string, { name: string; max: number; e1rm: number; sessions: number }>();
+    history.forEach(session => session.exercises.forEach(exercise => {
+      const working = exercise.sets.filter(set => set.completed && set.type === 'working');
+      if (!working.length) return;
+      const max = Math.max(...working.map(set => Number(set.weight) || 0));
+      const e1rm = Math.max(...working.map(set => Math.round((Number(set.weight) || 0) * (1 + (Number(set.reps) || 0) / 30))));
+      const previous = map.get(exercise.exerciseId);
+      map.set(exercise.exerciseId, { name: exercise.name, max: Math.max(previous?.max ?? 0, max), e1rm: Math.max(previous?.e1rm ?? 0, e1rm), sessions: (previous?.sessions ?? 0) + 1 });
+    }));
+    return [...map.values()];
+  }, [history]);
+
+  return <View style={styles.fill}>
+    <TopBar title="Historial" onBack={onBack} />
+    <ScrollView contentContainerStyle={styles.content}>
+      <Text style={styles.section}>SESIONES RECIENTES</Text>
+      {history.map(session => {
+        const exerciseNotes = session.exercises.filter(exercise => exercise.notes.trim());
+        return <Card key={session.id}>
+          <View style={styles.between}><View style={styles.grow}><Text style={styles.strong}>{session.routineName}</Text><Text style={styles.dim}>{formatDate(session.date)} · {Math.round(session.durationSeconds / 60)} min · {session.setsCompleted} series</Text></View><Text style={styles.orange}>{session.totalVolume.toLocaleString('es-CL')}kg</Text></View>
+          <Text numberOfLines={1} style={styles.exerciseList}>{session.exercises.map(item => item.name).join(' · ')}</Text>
+          {session.notes ? <View style={styles.note}><Text style={styles.noteLabel}>NOTA DE LA SESIÓN</Text><Text style={styles.noteText}>{session.notes}</Text></View> : null}
+          {exerciseNotes.map(exercise => <View key={exercise.id} style={styles.exerciseNote}><Text style={styles.exerciseNoteName}>{exercise.name}</Text><Text style={styles.noteText}>{exercise.notes}</Text></View>)}
+        </Card>;
+      })}
+      <Text style={styles.section}>RÉCORDS POR EJERCICIO</Text>
+      {records.map(record => <View key={record.name} style={styles.record}><View style={styles.recordIcon}><Ionicons name="trophy-outline" color={colors.orange} size={17} /></View><View style={styles.grow}><Text style={styles.strong}>{record.name}</Text><Text style={styles.dim}>{record.sessions} sesiones registradas</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.max}kg</Text><Text style={styles.metricLabel}>MÁXIMO</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.e1rm}kg</Text><Text style={styles.metricLabel}>E1RM</Text></View></View>)}
+      {history.length === 0 && <Card><Text style={styles.dim}>Termina tu primer entrenamiento para ver el historial.</Text></Card>}
+    </ScrollView>
+  </View>;
+}
+
+export function ProfileScreen({ onHistory }: { onHistory(): void }) {
+  const store = useAppStore();
+  const [local, setLocal] = useState<Profile>(store.profile);
+  const [saved, setSaved] = useState(false);
+  const change = (key: keyof Profile, value: string | number) => { setSaved(false); setLocal(current => ({ ...current, [key]: value })); };
+  const save = () => { store.updateProfile(local); setSaved(true); };
+  const syncMessage = store.syncState === 'pulling' ? 'Recuperando datos de Supabase…' : store.syncState === 'syncing' ? 'Sincronizando…' : store.syncState === 'synced' ? 'Sincronizado con Supabase' : store.syncState === 'error' ? 'Pendiente de sincronización' : 'Modo local · guardado en este dispositivo';
+
+  return <View style={styles.fill}>
+    <TopBar title="Perfil" action={<Ionicons name="settings-outline" color={colors.dim} size={21} />} />
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+      <Card><View style={styles.profileHead}><View style={styles.avatar}><Ionicons name="person" color={colors.muted} size={22} /></View><View><Text style={styles.profileName}>Atleta demo</Text><Text style={styles.dim}>{local.level} · {local.goal}</Text></View></View><Text style={[styles.sync, store.syncState === 'error' && styles.syncError]}>{syncMessage}</Text></Card>
+      <Text style={styles.section}>DATOS DEL ATLETA</Text>
+      <View style={styles.metricsRow}><Card><TextInput accessibilityLabel="Peso corporal en kilogramos" value={local.bodyWeight} onChangeText={value => change('bodyWeight', value)} keyboardType="decimal-pad" style={styles.bigInput} /><Text style={styles.metricLabel}>KG · PESO</Text></Card><Card><TextInput accessibilityLabel="Altura en centímetros" value={local.height} onChangeText={value => change('height', value)} keyboardType="number-pad" style={styles.bigInput} /><Text style={styles.metricLabel}>CM · ALTURA</Text></Card></View>
+      <Text style={styles.section}>CONFIGURACIÓN</Text>
+      <Card><Text style={styles.label}>OBJETIVO</Text><TextInput accessibilityLabel="Objetivo" value={local.goal} onChangeText={value => change('goal', value)} style={styles.input} /><Text style={styles.label}>NIVEL</Text><TextInput accessibilityLabel="Nivel" value={local.level} onChangeText={value => change('level', value)} style={styles.input} /><Text style={styles.label}>DESCANSO POR DEFECTO (SEGUNDOS)</Text><TextInput accessibilityLabel="Descanso por defecto en segundos" value={String(local.defaultRestSeconds)} onChangeText={value => change('defaultRestSeconds', Number(value) || 0)} keyboardType="number-pad" style={styles.input} /></Card>
+      <PrimaryButton title={saved ? 'Guardado ✓' : 'Guardar cambios'} onPress={save} light />
+      <Pressable accessibilityRole="button" accessibilityLabel="Historial de entrenamientos" onPress={onHistory} style={styles.historyButton}><Ionicons name="bar-chart-outline" color={colors.muted} size={17} /><Text style={styles.strong}>Historial de entrenamientos</Text><Ionicons name="chevron-forward" color={colors.subtle} size={16} /></Pressable>
+    </ScrollView>
+  </View>;
+}
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 }, grow: { flex: 1 }, content: { padding: 20, gap: 12, paddingBottom: 40 }, section: { color: colors.dim, fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginTop: 8 }, between: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }, strong: { color: colors.text, fontWeight: '700' }, dim: { color: colors.dim, fontSize: 12, marginTop: 3 }, orange: { color: colors.orange, fontSize: 11, fontWeight: '700' }, exerciseList: { color: colors.subtle, fontSize: 11 },
+  note: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 4 }, noteLabel: { color: colors.orange, fontSize: 8, fontWeight: '800', letterSpacing: 1.2 }, noteText: { color: colors.muted, fontSize: 12, lineHeight: 17 }, exerciseNote: { backgroundColor: colors.elevated, borderRadius: 9, padding: 10, gap: 3 }, exerciseNoteName: { color: colors.text, fontSize: 11, fontWeight: '700' },
+  record: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 13, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 10 }, recordIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' }, recordMetric: { alignItems: 'flex-end' }, metric: { color: colors.text, fontSize: 15, fontWeight: '800', fontFamily: 'monospace' }, metricLabel: { color: colors.dim, fontSize: 8, fontWeight: '700', letterSpacing: 1 },
+  profileHead: { flexDirection: 'row', alignItems: 'center', gap: 12 }, avatar: { width: 48, height: 48, borderRadius: 14, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' }, profileName: { color: colors.text, fontSize: 18, fontWeight: '800', fontFamily: condensed }, sync: { color: colors.success, fontSize: 10 }, syncError: { color: colors.warning }, metricsRow: { flexDirection: 'row', gap: 10 }, bigInput: { color: colors.text, fontSize: 30, fontWeight: '900', fontFamily: condensed, padding: 0 }, label: { color: colors.dim, fontSize: 9, fontWeight: '700', letterSpacing: 1.2 }, input: { backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.text, fontSize: 14 }, historyButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 13, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 12 },
+});

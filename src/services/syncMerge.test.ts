@@ -6,7 +6,7 @@ const older = '2026-01-01T00:00:00.000Z';
 const newer = '2026-02-01T00:00:00.000Z';
 
 function routine(id: string, updatedAt: string, name = id): Routine {
-  return { id, name, day: 1, exercises: [], createdAt: older, updatedAt };
+  return { id, name, day: 1, effortMode: 'rpe', exercises: [], createdAt: older, updatedAt };
 }
 
 function data(overrides: Partial<PersistedData> = {}): PersistedData {

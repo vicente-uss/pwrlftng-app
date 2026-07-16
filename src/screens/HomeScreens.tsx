@@ -1,27 +1,132 @@
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Brand, Card, PrimaryButton, formatDate } from '@/src/components/ui';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Brand, Card, PrimaryButton } from '@/src/components/ui';
 import { Routine } from '@/src/domain/types';
+import { effortModeLabel } from '@/src/domain/training';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
 import { signInWithEmail, signUpWithEmail } from '@/src/services/authService';
 import { useAppStore } from '@/src/store/AppStore';
 import { colors, condensed, shortDays } from '@/src/theme';
 
 export function LoginScreen({ onLogin, onDemo }: { onLogin(): Promise<void>; onDemo(): void }) {
-  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
-  const validate = () => { if (!isSupabaseConfigured) { setError('El backend aún no tiene credenciales. Por ahora usa la cuenta demo.'); return false; } if (!email.trim() || !password) { setError('Ingresa tu email y contraseña.'); return false; } return true; };
-  const submit = async (mode: 'login' | 'signup') => { if (!validate()) return; setBusy(true); setError(''); try { const session = mode === 'login' ? await signInWithEmail(email,password) : await signUpWithEmail(email,password); if (session) await onLogin(); else setError('Revisa tu correo para confirmar la cuenta y luego inicia sesión.'); } catch (cause) { const message = cause instanceof Error ? cause.message : 'No pudimos conectar con tu cuenta.'; setError(message === 'Invalid login credentials' ? 'Email o contraseña incorrectos.' : message); } finally { setBusy(false); } };
-  return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.login}><View style={styles.loginInner}><Brand /><View style={styles.form}><TextInput accessibilityLabel="Email" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor="#3a3a3a" style={styles.input} /><TextInput accessibilityLabel="Contraseña" value={password} onChangeText={setPassword} placeholder="Contraseña" placeholderTextColor="#3a3a3a" secureTextEntry style={styles.input} />{error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}<PrimaryButton title={busy ? 'Recuperando tus datos…' : 'Continuar'} light disabled={busy} onPress={() => submit('login')} /><Pressable accessibilityRole="button" accessibilityLabel="Crear cuenta" disabled={busy} onPress={() => submit('signup')}><Text style={styles.createAccount}>Crear cuenta con email</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Continuar con Google" disabled style={styles.google}><Text style={styles.muted}>G  Google · próximamente</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Probar con cuenta demo" disabled={busy} onPress={onDemo}><Text style={styles.demo}>Probar con cuenta demo →</Text></Pressable></View></View></KeyboardAvoidingView>;
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const validate = () => {
+    if (!isSupabaseConfigured) {
+      setError('El backend aún no tiene credenciales. Por ahora usa la cuenta demo.');
+      return false;
+    }
+    if (!email.trim() || !password) {
+      setError('Ingresa tu email y contraseña.');
+      return false;
+    }
+    return true;
+  };
+
+  const submit = async (mode: 'login' | 'signup') => {
+    if (!validate()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const session = mode === 'login'
+        ? await signInWithEmail(email, password)
+        : await signUpWithEmail(email, password);
+      if (session) await onLogin();
+      else setError('Revisa tu correo para confirmar la cuenta y luego inicia sesión.');
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'No pudimos conectar con tu cuenta.';
+      setError(message === 'Invalid login credentials' ? 'Email o contraseña incorrectos.' : message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <SafeAreaView style={styles.login}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.fill}>
+      <View style={styles.loginInner}>
+        <Brand />
+        <View style={styles.form}>
+          <TextInput accessibilityLabel="Email" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor="#3a3a3a" style={styles.input} />
+          <TextInput accessibilityLabel="Contraseña" value={password} onChangeText={setPassword} placeholder="Contraseña" placeholderTextColor="#3a3a3a" secureTextEntry style={styles.input} />
+          {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
+          <PrimaryButton title={busy ? 'Recuperando tus datos…' : 'Continuar'} light disabled={busy} onPress={() => submit('login')} />
+          <Pressable accessibilityRole="button" accessibilityLabel="Crear cuenta" disabled={busy} onPress={() => submit('signup')}><Text style={styles.createAccount}>Crear cuenta con email</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Continuar con Google" disabled style={styles.google}><Text style={styles.muted}>G  Google · próximamente</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Probar con cuenta demo" disabled={busy} onPress={onDemo}><Text style={styles.demo}>Probar con cuenta demo →</Text></Pressable>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
+  </SafeAreaView>;
 }
 
-export function HomeScreen({ onRoutine, onHistory, onStart }: { onRoutine(routine: Routine): void; onHistory(): void; onStart(routineId?: string): void }) {
+export function TrainingScreen({ onCreate, onRoutine, onHistory, onStart }: { onCreate(): void; onRoutine(routine: Routine): void; onHistory(): void; onStart(routineId?: string): void }) {
   const { routines, history } = useAppStore();
-  const jsDay = new Date().getDay(); const today = jsDay === 0 ? 7 : jsDay; const todayRoutine = routines.find(item => item.day === today); const last = history[0];
-  const date = new Date().toLocaleDateString('es-CL', { weekday:'long', day:'numeric', month:'long' }).toUpperCase();
-  return <View style={styles.fill}><View style={styles.header}><View><Text style={styles.date}>{date}</Text><Brand compact /></View><Pressable accessibilityRole="button" accessibilityLabel="Ver historial" onPress={onHistory} hitSlop={12}><Ionicons name="bar-chart-outline" color={colors.dim} size={21} /></Pressable></View><ScrollView contentContainerStyle={styles.content}><Card>{todayRoutine ? <><View style={styles.between}><Text style={styles.label}>HOY · {shortDays[today - 1]}</Text><Text style={styles.orange}>{todayRoutine.exercises.length} EJERCICIOS</Text></View><Text style={styles.cardTitle}>{todayRoutine.name}</Text><PrimaryButton title="Empezar entrenamiento" onPress={() => onStart(todayRoutine.id)} /></> : <><Text style={styles.label}>HOY · {shortDays[today - 1]}</Text><Text style={styles.muted}>Sin rutina programada</Text><PrimaryButton title="Empezar entrenamiento libre" light onPress={() => onStart()} /></>}</Card>{last && <Pressable accessibilityRole="button" accessibilityLabel="Ver última sesión" onPress={onHistory}><Card><Text style={styles.label}>ÚLTIMA SESIÓN</Text><View style={styles.between}><View><Text style={styles.strong}>{last.routineName}</Text><Text style={styles.dim}>{formatDate(last.date)} · {Math.round(last.durationSeconds / 60)} min</Text></View><Text style={styles.orange}>{last.totalVolume.toLocaleString('es-CL')}kg</Text></View></Card></Pressable>}<Text style={styles.section}>MIS RUTINAS</Text>{routines.map(routine => <Pressable accessibilityRole="button" accessibilityLabel={`Abrir rutina ${routine.name}`} key={routine.id} onPress={() => onRoutine(routine)} style={styles.routine}><Text style={styles.day}>{shortDays[routine.day - 1]}</Text><Text numberOfLines={1} style={styles.routineName}>{routine.name}</Text><Ionicons name="chevron-forward" color={colors.subtle} size={16} /></Pressable>)}</ScrollView></View>;
+  return <View style={styles.fill}>
+    <View style={styles.header}><Brand compact /></View>
+    <ScrollView contentContainerStyle={styles.content}>
+      <Card style={styles.freeCard}>
+        <View style={styles.freeIcon}><Ionicons name="flash-outline" color={colors.orange} size={21} /></View>
+        <Text style={styles.cardTitle}>Empezar entrenamiento libre</Text>
+        <Text style={styles.dim}>Registra una sesión sin guardar una rutina nueva.</Text>
+        <PrimaryButton title="Empezar entrenamiento libre" onPress={() => onStart()} />
+      </Card>
+
+      <PrimaryButton title="Nueva rutina" light onPress={onCreate} />
+
+      <View style={styles.sectionHead}><Text style={styles.section}>MIS RUTINAS</Text><Text style={styles.count}>{routines.length}/7</Text></View>
+      {routines.map(routine => <Card key={routine.id}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Abrir rutina ${routine.name}`} onPress={() => onRoutine(routine)} style={styles.routineHead}>
+          <View style={styles.dayBox}><Text style={styles.day}>{shortDays[routine.day - 1]}</Text><Ionicons name="barbell-outline" color={colors.dim} size={16} /></View>
+          <View style={styles.grow}>
+            <Text style={styles.routineName}>{routine.name}</Text>
+            <Text style={styles.dim}>{routine.exercises.length} ejercicios · {routine.exercises.reduce((sum, item) => sum + item.sets.length, 0)} series · {effortModeLabel(routine.effortMode)}</Text>
+          </View>
+          <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+        </Pressable>
+        <PrimaryButton title="Iniciar rutina" onPress={() => onStart(routine.id)} />
+      </Card>)}
+
+      {routines.length === 0 ? <Card><Text style={styles.muted}>Aún no tienes rutinas.</Text><PrimaryButton title="Crear primera rutina" onPress={onCreate} /></Card> : null}
+
+      <Pressable accessibilityRole="button" accessibilityLabel="Sesiones anteriores" onPress={onHistory} style={styles.historyButton}>
+        <View style={styles.historyIcon}><Ionicons name="time-outline" color={colors.orange} size={19} /></View>
+        <View style={styles.grow}><Text style={styles.routineName}>Sesiones anteriores</Text><Text style={styles.dim}>{history.length ? `${history.length} registradas` : 'Aún no hay sesiones'}</Text></View>
+        <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+      </Pressable>
+    </ScrollView>
+  </View>;
 }
 
 const styles = StyleSheet.create({
-  fill:{flex:1},login:{flex:1,backgroundColor:colors.background},loginInner:{flex:1,justifyContent:'center',padding:24,gap:48},form:{gap:12},input:{backgroundColor:'#141414',borderWidth:1,borderColor:colors.border,borderRadius:12,padding:16,color:colors.text,fontSize:15},error:{color:colors.danger,fontSize:12,lineHeight:17},createAccount:{color:colors.muted,textAlign:'center',fontSize:12,paddingVertical:4},google:{borderWidth:1,borderColor:'#2a2a2a',borderRadius:12,padding:15,alignItems:'center',opacity:.55},demo:{color:colors.orange,textAlign:'center',padding:12},muted:{color:colors.muted},header:{padding:20,paddingTop:18,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},date:{color:colors.dim,fontSize:10,letterSpacing:1.5},content:{padding:20,paddingTop:8,gap:14,paddingBottom:35},between:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:10},label:{color:colors.dim,fontSize:10,fontWeight:'700',letterSpacing:1.2},orange:{color:colors.orange,fontSize:11,fontWeight:'700'},cardTitle:{color:colors.text,fontSize:20,fontWeight:'800',fontFamily:condensed},strong:{color:colors.text,fontWeight:'700'},dim:{color:colors.dim,fontSize:12,marginTop:3},section:{color:colors.dim,fontSize:10,fontWeight:'700',letterSpacing:1.5,marginTop:8},routine:{backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,borderRadius:12,padding:15,flexDirection:'row',alignItems:'center',gap:12},day:{color:colors.orange,fontSize:10,fontWeight:'700',width:30},routineName:{color:colors.text,fontWeight:'600',flex:1},
+  fill: { flex: 1 },
+  login: { flex: 1, backgroundColor: colors.background },
+  loginInner: { flex: 1, justifyContent: 'center', padding: 24, gap: 48 },
+  form: { gap: 12 },
+  input: { backgroundColor: '#141414', borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, color: colors.text, fontSize: 15 },
+  error: { color: colors.danger, fontSize: 12, lineHeight: 17 },
+  createAccount: { color: colors.muted, textAlign: 'center', fontSize: 12, paddingVertical: 4 },
+  google: { borderWidth: 1, borderColor: '#2a2a2a', borderRadius: 12, padding: 15, alignItems: 'center', opacity: 0.55 },
+  demo: { color: colors.orange, textAlign: 'center', padding: 12 },
+  muted: { color: colors.muted },
+  header: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 6 },
+  content: { padding: 20, paddingTop: 8, gap: 14, paddingBottom: 38 },
+  freeCard: { backgroundColor: '#11100f', borderColor: '#3a2417' },
+  freeIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#24160e', alignItems: 'center', justifyContent: 'center' },
+  cardTitle: { color: colors.text, fontSize: 23, fontWeight: '900', fontFamily: condensed },
+  dim: { color: colors.dim, fontSize: 12, lineHeight: 17 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
+  section: { color: colors.dim, fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  count: { color: colors.subtle, fontSize: 10 },
+  routineHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  dayBox: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  day: { color: colors.orange, fontSize: 10, fontWeight: '800' },
+  grow: { flex: 1 },
+  routineName: { color: colors.text, fontWeight: '700', fontSize: 15 },
+  historyButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
+  historyIcon: { width: 40, height: 40, borderRadius: 11, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' },
 });

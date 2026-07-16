@@ -23,6 +23,7 @@ describe('data migrations', () => {
     });
 
     expect(session?.effortMode).toBe('rpe');
+    expect(session?.restSeconds).toBe(180);
     expect(session?.notes).toBe('');
     expect(session?.exercises[0].notes).toBe('');
     expect(session?.exercises[0].sets[0]).toMatchObject({ targetRepsMin: 5, targetRepsMax: 5, rir: '' });
@@ -38,5 +39,26 @@ describe('data migrations', () => {
     expect(session?.notes).toBe('Sesión sólida');
     expect(session?.exercises[0].notes).toBe('Buena técnica');
     expect(session?.exercises[0].sets[0]).toMatchObject({ targetRepsMin: 5, targetRepsMax: 7, rir: '2' });
+  });
+
+  it('reemplaza solo el prototipo legado completo y elimina su historial ficticio', () => {
+    const legacyRoutines = ['routine-a', 'routine-b', 'routine-c'].map((id, index) => ({
+      id,
+      name: `Legado ${index + 1}`,
+      day: index + 1,
+      exercises: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }));
+    const data = normalizePersistedData({
+      routines: legacyRoutines,
+      history: [{ id: 'history-demo', routineName: 'Demo', date: '2026-01-01T00:00:00.000Z', exercises: [] }],
+      profile: { bodyWeight: '85', height: '178', goal: 'Fuerza máxima', level: 'Intermedio', defaultRestSeconds: 180 },
+    });
+
+    expect(data?.routines.map(routine => routine.name)).toEqual(['Día 1', 'Día 2', 'Día 3', 'Día 4']);
+    expect(data?.history).toEqual([]);
+    expect(data?.tombstones.map(item => item.recordId).sort()).toEqual(['routine-a', 'routine-b', 'routine-c']);
+    expect(data?.profile).toMatchObject({ goal: 'Ganar fuerza máxima', level: 'Bloque base' });
   });
 });

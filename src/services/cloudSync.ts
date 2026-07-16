@@ -2,6 +2,7 @@ import { ActiveExercise, ActiveSet, EffortMode, PersistedData, Profile, Routine,
 import { isEffortMode } from '@/src/domain/training';
 import { supabase } from '@/src/lib/supabase';
 import { mergePersistedData, withoutDeletedRoutines } from '@/src/services/syncMerge';
+import { migratePrototypeData } from '@/src/storage/dataMigrations';
 
 type PullResult = { status: 'no-session' } | { status: 'pulled'; data: PersistedData };
 export type PushResult = 'no-session' | 'pull-required' | 'synced';
@@ -136,7 +137,17 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
       .filter(item => item.entity_type === 'routine')
       .map(item => ({ entityType: 'routine', recordId: item.record_id, deletedAt: item.deleted_at })),
   };
-  const merged = mergePersistedData(localData, remoteData, options.includeLocalData);
+  const remoteAccountUntouched = remoteRoutines.length === 0
+    && remoteHistory.length === 0
+    && remoteData.tombstones.length === 0
+    && profileRow?.body_weight == null
+    && profileRow?.height_cm == null
+    && profileRow?.default_rest_seconds === 180;
+  const merged = migratePrototypeData(
+    !options.includeLocalData && remoteAccountUntouched
+      ? localData
+      : mergePersistedData(localData, remoteData, options.includeLocalData),
+  );
   pulledUsers.add(userId);
   return { status: 'pulled', data: merged };
 }

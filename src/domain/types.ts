@@ -1,5 +1,5 @@
-export type Tab = 'home' | 'workout' | 'profile';
-export type Screen = 'login' | 'home' | 'routines' | 'create-routine' | 'routine-detail' | 'active-session' | 'summary' | 'history' | 'profile';
+export type Tab = 'training' | 'history' | 'profile';
+export type Screen = 'login' | 'training' | 'create-routine' | 'routine-detail' | 'active-session' | 'summary' | 'history' | 'profile';
 export type SetType = 'warmup' | 'working';
 export type EffortMode = 'rpe' | 'rir' | 'both' | 'none';
 
@@ -10,7 +10,7 @@ export type Routine = { id: string; name: string; day: number; effortMode: Effor
 
 export type ActiveSet = { id: string; type: SetType; weight: string; reps: string; targetRepsMin: number; targetRepsMax: number; rpe: string; rir: string; completed: boolean; completedAt?: string };
 export type ActiveExercise = { id: string; exerciseId: string; name: string; muscle: string; notes: string; sets: ActiveSet[] };
-export type ActiveSession = { id: string; routineId?: string; routineName: string; effortMode: EffortMode; startedAt: number; notes: string; exercises: ActiveExercise[] };
+export type ActiveSession = { id: string; routineId?: string; routineName: string; effortMode: EffortMode; restSeconds: number; startedAt: number; notes: string; exercises: ActiveExercise[] };
 
 export type WorkoutHistory = {
   id: string;

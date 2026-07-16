@@ -1,3 +1,5 @@
+import { freshDefaultData, LEGACY_SEED_ROUTINE_IDS } from '@/src/data/seed';
+import { DEFAULT_BLOCK, MAX_REST_SECONDS, normalizeGoal } from '@/src/domain/profileOptions';
 import { ActiveExercise, ActiveSession, ActiveSet, DeletionTombstone, PersistedData, Profile, Routine, RoutineSet, SetType, WorkoutHistory } from '@/src/domain/types';
 import { isEffortMode, normalizeRepRange } from '@/src/domain/training';
 
@@ -113,9 +115,9 @@ function normalizeProfile(value: unknown, migratedAt: string): Profile {
   return {
     bodyWeight: text(source.bodyWeight),
     height: text(source.height),
-    goal: text(source.goal, 'Fuerza máxima'),
-    level: text(source.level, 'Intermedio'),
-    defaultRestSeconds: Math.max(0, Math.round(number(source.defaultRestSeconds, 180))),
+    goal: normalizeGoal(text(source.goal, 'Ganar fuerza máxima')),
+    level: DEFAULT_BLOCK,
+    defaultRestSeconds: Math.min(MAX_REST_SECONDS, Math.max(0, Math.round(number(source.defaultRestSeconds, 180)))),
     updatedAt: text(source.updatedAt, migratedAt),
   };
 }
@@ -130,16 +132,44 @@ function normalizeTombstones(value: unknown): DeletionTombstone[] {
   });
 }
 
+export function migratePrototypeData(data: PersistedData): PersistedData {
+  const routineIds = new Set(data.routines.map(routine => routine.id));
+  const hasCompleteLegacySeed = LEGACY_SEED_ROUTINE_IDS.every(id => routineIds.has(id));
+  const history = data.history.filter(workout => workout.id !== 'history-demo');
+  const profile = { ...data.profile, goal: normalizeGoal(data.profile.goal), level: DEFAULT_BLOCK };
+
+  if (!hasCompleteLegacySeed) return { ...data, history, profile };
+
+  const routines = new Map(
+    data.routines
+      .filter(routine => !LEGACY_SEED_ROUTINE_IDS.includes(routine.id as (typeof LEGACY_SEED_ROUTINE_IDS)[number]))
+      .map(routine => [routine.id, routine]),
+  );
+  freshDefaultData().routines.forEach(routine => {
+    if (!routines.has(routine.id)) routines.set(routine.id, routine);
+  });
+
+  const tombstones = new Map(data.tombstones.map(item => [`${item.entityType}:${item.recordId}`, item]));
+  LEGACY_SEED_ROUTINE_IDS.forEach(recordId => {
+    const key = `routine:${recordId}`;
+    if (!tombstones.has(key)) {
+      tombstones.set(key, { entityType: 'routine', recordId, deletedAt: '2026-07-14T00:00:00.000Z' });
+    }
+  });
+
+  return { routines: [...routines.values()], history, profile, tombstones: [...tombstones.values()] };
+}
+
 export function normalizePersistedData(value: unknown): PersistedData | null {
   const source = record(value);
   if (!Array.isArray(source.routines) || !Array.isArray(source.history) || !source.profile) return null;
   const migratedAt = new Date().toISOString();
-  return {
+  return migratePrototypeData({
     routines: source.routines.map(normalizeRoutine),
     history: source.history.map(normalizeWorkout),
     profile: normalizeProfile(source.profile, migratedAt),
     tombstones: normalizeTombstones(source.tombstones),
-  };
+  });
 }
 
 export function normalizeActiveSession(value: unknown): ActiveSession | null {
@@ -150,6 +180,7 @@ export function normalizeActiveSession(value: unknown): ActiveSession | null {
     routineId: typeof source.routineId === 'string' ? source.routineId : undefined,
     routineName: source.routineName,
     effortMode: isEffortMode(source.effortMode) ? source.effortMode : 'rpe',
+    restSeconds: Math.min(MAX_REST_SECONDS, Math.max(0, Math.round(number(source.restSeconds, 180)))),
     startedAt: number(source.startedAt, Date.now()),
     notes: text(source.notes),
     exercises: source.exercises.map(normalizeActiveExercise),

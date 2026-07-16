@@ -23,6 +23,6 @@ export async function signUpWithEmail(email: string, password: string) {
 
 export async function signOut() {
   if (!supabase) return;
-  const { error } = await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
   if (error) throw error;
 }

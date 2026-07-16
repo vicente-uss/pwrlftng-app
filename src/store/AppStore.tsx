@@ -1,9 +1,10 @@
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { DEFAULT_DATA, EXERCISES } from '@/src/data/seed';
+import { EXERCISES, SEED_ROUTINE_IDS, freshDefaultData } from '@/src/data/seed';
+import { DEFAULT_BLOCK, GOAL_OPTIONS, MAX_REST_SECONDS } from '@/src/domain/profileOptions';
 import { ActiveExercise, ActiveSession, EffortMode, PersistedData, Profile, Routine, RoutineExercise, SetType, WorkoutHistory, makeId } from '@/src/domain/types';
 import { normalizeRepRange } from '@/src/domain/training';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
-import { pullDataFromCloud, syncDataToCloud } from '@/src/services/cloudSync';
+import { pullDataFromCloud, resetCloudSyncGuard, syncDataToCloud } from '@/src/services/cloudSync';
 import { loadActiveSession, loadData, saveActiveSession, saveData } from '@/src/storage/appStorage';
 
 export type CreateRoutineSetInput = { type: SetType; weight: number; repsMin: number; repsMax: number; rpe?: number; rir?: number };
@@ -33,9 +34,12 @@ type Store = PersistedData & {
   updateActiveSessionNotes(notes: string): void;
   toggleActiveSet(exerciseId: string, setId: string): void;
   addActiveSet(exerciseId: string): void;
+  removeActiveSet(exerciseId: string, setId: string): void;
+  updateActiveSessionSettings(effortMode: EffortMode, restSeconds: number): void;
   finishWorkout(): WorkoutHistory | null;
   cancelWorkout(): void;
   updateProfile(profile: Profile): void;
+  resetAfterSignOut(): void;
 };
 
 const Context = createContext<Store | null>(null);
@@ -63,11 +67,11 @@ function toActiveExercise(exercise: RoutineExercise): ActiveExercise {
 
 function isUnmodifiedSeedData(data: PersistedData) {
   const routineIds = data.routines.map(item => item.id).sort().join(',');
-  return routineIds === 'routine-a,routine-b,routine-c'
-    && data.history.length === 1 && data.history[0]?.id === 'history-demo'
+  return routineIds === [...SEED_ROUTINE_IDS].sort().join(',')
+    && data.history.length === 0
     && data.tombstones.length === 0
     && data.profile.bodyWeight === '85' && data.profile.height === '178'
-    && data.profile.goal === 'Fuerza máxima' && data.profile.level === 'Intermedio'
+    && data.profile.goal === GOAL_OPTIONS[0] && data.profile.level === DEFAULT_BLOCK
     && data.profile.defaultRestSeconds === 180;
 }
 
@@ -79,7 +83,7 @@ function validEffortInput(field: SetField, value: string) {
 }
 
 export function AppStoreProvider({ children }: PropsWithChildren) {
-  const [data, setData] = useState<PersistedData>(DEFAULT_DATA);
+  const [data, setData] = useState<PersistedData>(() => freshDefaultData());
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>('local');
@@ -231,6 +235,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       routineId,
       routineName: routine?.name ?? 'Entrenamiento libre',
       effortMode: routine?.effortMode ?? 'rpe',
+      restSeconds: data.profile.defaultRestSeconds,
       startedAt: Date.now(),
       notes: '',
       exercises: routine?.exercises.map(toActiveExercise) ?? [],
@@ -298,6 +303,19 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
     }),
   }) : current);
 
+  const removeActiveSet = (exerciseId: string, setId: string) => setActiveSession(current => current ? ({
+    ...current,
+    exercises: current.exercises.map(exercise => exercise.id === exerciseId
+      ? { ...exercise, sets: exercise.sets.filter(set => set.id !== setId) }
+      : exercise),
+  }) : current);
+
+  const updateActiveSessionSettings = (effortMode: EffortMode, restSeconds: number) => setActiveSession(current => current ? ({
+    ...current,
+    effortMode,
+    restSeconds: Math.min(MAX_REST_SECONDS, Math.max(0, Math.round(restSeconds))),
+  }) : current);
+
   const finishWorkout = () => {
     if (!activeSession) return null;
     const exercises = activeSession.exercises.map(exercise => ({ ...exercise, notes: exercise.notes.trim() }));
@@ -320,12 +338,25 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
 
   const cancelWorkout = () => setActiveSession(null);
   const updateProfile = (profile: Profile) => setData(current => ({ ...current, profile: { ...profile, updatedAt: new Date().toISOString() } }));
+  const resetAfterSignOut = () => {
+    const defaults = freshDefaultData();
+    dataRef.current = defaults;
+    hasLocalUserDataRef.current = false;
+    cloudReadyRef.current = false;
+    skipNextAutoSyncRef.current = false;
+    bootstrapPromiseRef.current = null;
+    resetCloudSyncGuard();
+    setCloudReady(false);
+    setSyncState('local');
+    setActiveSession(null);
+    setData(defaults);
+  };
 
   const value: Store = {
     ...data, hydrated, activeSession, exercises: EXERCISES, syncState, initializeCloudSync, syncNow,
     createRoutine, duplicateRoutine, deleteRoutine, startWorkout, addExerciseToActive, updateActiveSet,
     updateActiveExerciseNotes, updateActiveSessionNotes, toggleActiveSet, addActiveSet, finishWorkout,
-    cancelWorkout, updateProfile,
+    removeActiveSet, updateActiveSessionSettings, cancelWorkout, updateProfile, resetAfterSignOut,
   };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

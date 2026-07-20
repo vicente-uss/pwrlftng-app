@@ -44,7 +44,7 @@ export function HistoryScreen() {
   </View>;
 }
 
-export function ProfileScreen({ onSignOut }: { onSignOut(): Promise<void> }) {
+export function ProfileScreen({ onSignOut, onExercises }: { onSignOut(): Promise<void>; onExercises(): void }) {
   const store = useAppStore();
   const [local, setLocal] = useState<Profile>({ ...store.profile, level: DEFAULT_BLOCK });
   const [customRest, setCustomRest] = useState(isPresetRest(store.profile.defaultRestSeconds) ? '' : formatRestDuration(store.profile.defaultRestSeconds));
@@ -124,6 +124,13 @@ export function ProfileScreen({ onSignOut }: { onSignOut(): Promise<void> }) {
 
       <PrimaryButton title={saved ? 'Guardado ✓' : 'Guardar cambios'} onPress={save} light disabled={restInvalid} />
 
+      <Text style={styles.section}>BIBLIOTECA</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Ejercicios" onPress={onExercises} style={styles.exercisesButton}>
+        <View style={styles.exercisesIcon}><Ionicons name="barbell-outline" color={colors.orange} size={18} /></View>
+        <View style={styles.grow}><Text style={styles.strong}>Ejercicios</Text><Text style={styles.dim}>Catálogo, video y récords por ejercicio</Text></View>
+        <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+      </Pressable>
+
       <Text style={styles.section}>SESIÓN</Text>
       {logoutError ? <Text accessibilityLiveRegion="polite" style={styles.warning}>{logoutError}</Text> : null}
       <Pressable accessibilityRole="button" accessibilityLabel="Cerrar sesión" disabled={logoutBusy} onPress={() => setLogoutVisible(true)} style={styles.logoutButton}><Ionicons name="log-out-outline" color={colors.danger} size={19} /><Text style={styles.logoutText}>{logoutBusy ? 'Cerrando sesión…' : 'Cerrar sesión'}</Text></Pressable>
@@ -177,4 +184,6 @@ const styles = StyleSheet.create({
   warning: { color: colors.warning, fontSize: 12, lineHeight: 17 },
   logoutButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: '#43201f', borderRadius: 13, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
   logoutText: { color: colors.danger, fontWeight: '700' },
+  exercisesButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 13, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  exercisesIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' },
 });

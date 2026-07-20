@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { BackHandler, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppShell } from '@/src/components/ui';
-import { Routine, Screen, Tab } from '@/src/domain/types';
+import { Exercise, Routine, Screen, Tab } from '@/src/domain/types';
+import { ExerciseDetailScreen, ExerciseLibraryScreen } from '@/src/screens/ExerciseLibraryScreen';
 import { HistoryScreen, ProfileScreen } from '@/src/screens/HistoryProfileScreens';
 import { LoginScreen, TrainingScreen } from '@/src/screens/HomeScreens';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
@@ -19,6 +20,7 @@ export function PwrlftngApp() {
   const store = useAppStore();
   const [routes, setRoutes] = useState<Screen[]>(['login']);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>(null);
   const [authChecked, setAuthChecked] = useState(!isSupabaseConfigured);
   const { activeSession, hydrated, initializeCloudSync } = store;
@@ -59,6 +61,12 @@ export function PwrlftngApp() {
     }
   }, [screen, selectedRoutineId, store.routines]);
 
+  useEffect(() => {
+    if (screen === 'exercise-detail' && !store.exercises.some(exercise => exercise.id === selectedExerciseId)) {
+      setRoutes(resetScreen('profile'));
+    }
+  }, [screen, selectedExerciseId, store.exercises]);
+
   if (!hydrated || !authChecked) return <SafeAreaView style={styles.loading} />;
 
   const navigate = (next: Screen) => setRoutes(current => pushScreen(current, next));
@@ -75,6 +83,11 @@ export function PwrlftngApp() {
     navigate('active-session');
   };
   const selectedRoutine = store.routines.find(item => item.id === selectedRoutineId);
+  const selectExercise = (exercise: Exercise) => {
+    setSelectedExerciseId(exercise.id);
+    navigate('exercise-detail');
+  };
+  const selectedExercise = store.exercises.find(item => item.id === selectedExerciseId);
 
   const handleSignOut = async () => {
     if (authMode === 'account') {
@@ -103,12 +116,14 @@ export function PwrlftngApp() {
     replace('routine-detail');
   }} /></SafeAreaView>;
   if (screen === 'routine-detail' && selectedRoutine) return <SafeAreaView style={styles.page}><RoutineDetailScreen routine={selectedRoutine} onBack={goBack} onStart={() => start(selectedRoutine.id)} onDeleted={() => reset('training')} /></SafeAreaView>;
+  if (screen === 'exercise-library') return <SafeAreaView style={styles.page}><ExerciseLibraryScreen onBack={goBack} onExercise={selectExercise} /></SafeAreaView>;
+  if (screen === 'exercise-detail' && selectedExercise) return <SafeAreaView style={styles.page}><ExerciseDetailScreen exercise={selectedExercise} onBack={goBack} /></SafeAreaView>;
 
   const tab = tabForScreen(screen);
   return <AppShell tab={tab} onTab={goTab}><View style={styles.body}>
     {screen === 'training' ? <TrainingScreen onCreate={() => navigate('create-routine')} onRoutine={selectRoutine} onHistory={() => goTab('history')} onStart={start} /> : null}
     {screen === 'history' ? <HistoryScreen /> : null}
-    {screen === 'profile' ? <ProfileScreen onSignOut={handleSignOut} /> : null}
+    {screen === 'profile' ? <ProfileScreen onSignOut={handleSignOut} onExercises={() => navigate('exercise-library')} /> : null}
   </View></AppShell>;
 }
 

@@ -47,6 +47,27 @@ function DraftInput({ label, value, onChange, decimal = false }: { label: string
   </View>;
 }
 
+function RepsControl({ index, repsMin, repsMax, onChangeMin, onChangeMax, onToggleMode }: {
+  index: number;
+  repsMin: string;
+  repsMax: string;
+  onChangeMin(value: string): void;
+  onChangeMax(value: string): void;
+  onToggleMode(): void;
+}) {
+  const isRange = (Number(repsMin) || 0) !== (Number(repsMax) || 0);
+  return <View style={styles.draftField}>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Alternar modo de reps serie ${index + 1}`} onPress={onToggleMode}>
+      <Text style={styles.draftLabel}>REPS</Text>
+    </Pressable>
+    {isRange ? <View style={styles.repsRangeRow}>
+      <TextInput accessibilityLabel={`Reps mínimas serie ${index + 1}`} value={repsMin} onChangeText={onChangeMin} selectTextOnFocus keyboardType="number-pad" style={[styles.draftInput, styles.repsRangeInput]} />
+      <Text style={styles.repsDash}>–</Text>
+      <TextInput accessibilityLabel={`Reps máximas serie ${index + 1}`} value={repsMax} onChangeText={onChangeMax} selectTextOnFocus keyboardType="number-pad" style={[styles.draftInput, styles.repsRangeInput]} />
+    </View> : <TextInput accessibilityLabel={`Reps serie ${index + 1}`} value={repsMin} onChangeText={value => { onChangeMin(value); onChangeMax(value); }} selectTextOnFocus keyboardType="number-pad" style={styles.draftInput} />}
+  </View>;
+}
+
 export function RoutinesScreen({ onCreate, onRoutine }: { onCreate(): void; onRoutine(routine: Routine): void }) {
   const { routines } = useAppStore();
   return <View style={styles.fill}>
@@ -88,6 +109,16 @@ export function CreateRoutineScreen({ onBack, onSaved }: { onBack(): void; onSav
     sets: exercise.sets.map(set => set.id === setId ? { ...set, [field]: value } : set),
   })));
 
+  const toggleRepsMode = (exerciseId: string, setId: string) => setDrafts(current => current.map(exercise => exercise.exerciseId !== exerciseId ? exercise : ({
+    ...exercise,
+    sets: exercise.sets.map(set => {
+      if (set.id !== setId) return set;
+      const min = Number(set.repsMin) || 0;
+      const max = Number(set.repsMax) || 0;
+      return min === max ? { ...set, repsMax: String(min + 2) } : { ...set, repsMax: set.repsMin };
+    }),
+  })));
+
   const save = () => {
     if (disabled) return;
     const exercises = drafts.map(exercise => ({
@@ -125,13 +156,19 @@ export function CreateRoutineScreen({ onBack, onSaved }: { onBack(): void; onSav
             <Ionicons name={draft ? 'checkmark' : 'add'} color={draft ? colors.orange : colors.dim} size={18} />
           </Pressable>
           {draft && <View style={styles.setEditor}>
-            <Text style={styles.editorHint}>Define un valor fijo usando el mismo mínimo y máximo, o crea un rango como 5–7.</Text>
+            <Text style={styles.editorHint}>Toca “REPS” para alternar entre reps fijas y un rango (ej. 5–7).</Text>
             {draft.sets.map((set, index) => <View key={set.id} style={styles.draftSet}>
               <Text style={styles.setTitle}>SERIE {index + 1}</Text>
               <View style={styles.draftFields}>
                 <DraftInput label={`Peso serie ${index + 1}`} value={set.weight} onChange={value => updateSet(exercise.id, set.id, 'weight', value)} decimal />
-                <DraftInput label={`Reps mínimas serie ${index + 1}`} value={set.repsMin} onChange={value => updateSet(exercise.id, set.id, 'repsMin', value)} />
-                <DraftInput label={`Reps máximas serie ${index + 1}`} value={set.repsMax} onChange={value => updateSet(exercise.id, set.id, 'repsMax', value)} />
+                <RepsControl
+                  index={index}
+                  repsMin={set.repsMin}
+                  repsMax={set.repsMax}
+                  onChangeMin={value => updateSet(exercise.id, set.id, 'repsMin', value)}
+                  onChangeMax={value => updateSet(exercise.id, set.id, 'repsMax', value)}
+                  onToggleMode={() => toggleRepsMode(exercise.id, set.id)}
+                />
                 {usesRpe(effortMode) && <DraftInput label={`RPE serie ${index + 1}`} value={set.rpe} onChange={value => updateSet(exercise.id, set.id, 'rpe', value)} decimal />}
                 {usesRir(effortMode) && <DraftInput label={`RIR serie ${index + 1}`} value={set.rir} onChange={value => updateSet(exercise.id, set.id, 'rir', value)} decimal />}
               </View>
@@ -188,6 +225,7 @@ const styles = StyleSheet.create({
   effortGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, effortOption: { width: '48%', minHeight: 68, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, gap: 4 }, effortOptionActive: { borderColor: colors.orange, backgroundColor: '#21130d' }, effortTitle: { color: colors.muted, fontWeight: '800' }, effortDescription: { color: colors.dim, fontSize: 10, lineHeight: 14 },
   exerciseSelector: { gap: 0 }, exerciseRow: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, exerciseActive: { borderColor: colors.orange, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   setEditor: { borderWidth: 1, borderTopWidth: 0, borderColor: colors.orange, borderBottomLeftRadius: 12, borderBottomRightRadius: 12, padding: 12, gap: 10, backgroundColor: '#0f0f0f' }, editorHint: { color: colors.dim, fontSize: 11, lineHeight: 16 }, draftSet: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 7 }, setTitle: { color: colors.orange, fontSize: 9, fontWeight: '800', letterSpacing: 1.3 }, draftFields: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, draftField: { width: 72, gap: 4 }, draftLabel: { color: colors.dim, fontSize: 8, height: 20 }, draftInput: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingVertical: 9, paddingHorizontal: 6, color: colors.text, textAlign: 'center', fontFamily: 'monospace' },
+  repsRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 3 }, repsRangeInput: { flex: 1, paddingHorizontal: 2 }, repsDash: { color: colors.dim, fontSize: 12, fontWeight: '700' },
   save: { color: colors.orange, fontWeight: '700' }, disabled: { color: colors.subtle }, warning: { color: colors.warning, fontSize: 12 }, cta: { paddingHorizontal: 20, paddingBottom: 8 }, exerciseBlock: { gap: 8 }, rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   tableHead: { flexDirection: 'row', paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: colors.border }, tableRow: { flexDirection: 'row', paddingVertical: 7 }, setNo: { width: 42, color: colors.dim, fontFamily: 'monospace', fontSize: 11 }, col: { flex: 1, color: colors.dim, fontFamily: 'monospace', fontSize: 11 }, colValue: { flex: 1, color: colors.text, fontFamily: 'monospace', fontSize: 13 }, effortCol: { width: 42, color: colors.dim, fontFamily: 'monospace', fontSize: 11 }, effortValue: { width: 42, color: colors.text, fontFamily: 'monospace', fontSize: 13 }, warmup: { color: colors.warning },
   delete: { padding: 16, alignItems: 'center' }, deleteText: { color: colors.danger, fontSize: 13 },

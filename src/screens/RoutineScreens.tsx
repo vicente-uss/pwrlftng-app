@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, ConfirmDialog, PrimaryButton, TopBar } from '@/src/components/ui';
-import { EffortMode, Exercise, Routine, makeId } from '@/src/domain/types';
+import { EffortMode, Exercise, Routine, RoutineExercise, makeId } from '@/src/domain/types';
 import { EFFORT_MODES, effortModeLabel, formatRepRange, usesRir, usesRpe } from '@/src/domain/training';
 import { CreateRoutineSetInput, useAppStore } from '@/src/store/AppStore';
 import { colors } from '@/src/theme';
@@ -18,6 +18,20 @@ function newDraftExercise(exerciseId: string): DraftExercise {
   return {
     exerciseId,
     sets: [1, 2, 3].map(() => ({ id: makeId('draft-set'), weight: '0', repsMin: '5', repsMax: '5', rpe: '8', rir: '2' })),
+  };
+}
+
+function toDraftExercise(exercise: RoutineExercise): DraftExercise {
+  return {
+    exerciseId: exercise.exerciseId,
+    sets: exercise.sets.map(set => ({
+      id: makeId('draft-set'),
+      weight: String(set.weight),
+      repsMin: String(set.repsMin),
+      repsMax: String(set.repsMax),
+      rpe: set.rpe == null ? '' : String(set.rpe),
+      rir: set.rir == null ? '' : String(set.rir),
+    })),
   };
 }
 
@@ -83,13 +97,13 @@ export function RoutinesScreen({ onCreate, onRoutine }: { onCreate(): void; onRo
   </View>;
 }
 
-export function CreateRoutineScreen({ onBack, onSaved }: { onBack(): void; onSaved(routine: Routine): void }) {
-  const { exercises, routines, createRoutine } = useAppStore();
-  const [name, setName] = useState('');
-  const [day, setDay] = useState(1);
-  const [effortMode, setEffortMode] = useState<EffortMode>('rpe');
-  const [drafts, setDrafts] = useState<DraftExercise[]>([]);
-  const atLimit = routines.length >= 7;
+export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBack(): void; onSaved(routine: Routine): void; editingRoutine?: Routine }) {
+  const { exercises, routines, createRoutine, updateRoutine } = useAppStore();
+  const [name, setName] = useState(editingRoutine?.name ?? '');
+  const [day, setDay] = useState(editingRoutine?.day ?? 1);
+  const [effortMode, setEffortMode] = useState<EffortMode>(editingRoutine?.effortMode ?? 'rpe');
+  const [drafts, setDrafts] = useState<DraftExercise[]>(() => editingRoutine ? editingRoutine.exercises.map(toDraftExercise) : []);
+  const atLimit = !editingRoutine && routines.length >= 7;
   const hasInvalidRange = drafts.some(exercise => exercise.sets.some(set => {
     const minimum = Number(set.repsMin);
     const maximum = Number(set.repsMax);
@@ -132,11 +146,11 @@ export function CreateRoutineScreen({ onBack, onSaved }: { onBack(): void; onSav
         rir: usesRir(effortMode) ? optionalNumber(set.rir) : undefined,
       })),
     }));
-    onSaved(createRoutine({ name, day, effortMode, exercises }));
+    onSaved(editingRoutine ? updateRoutine(editingRoutine.id, { name, day, effortMode, exercises }) : createRoutine({ name, day, effortMode, exercises }));
   };
 
   return <View style={styles.fill}>
-    <TopBar title="Nueva rutina" onBack={onBack} action={<Pressable accessibilityRole="button" accessibilityLabel="Guardar rutina" disabled={disabled} onPress={save}><Text style={[styles.save, disabled && styles.disabled]}>Guardar</Text></Pressable>} />
+    <TopBar title={editingRoutine ? 'Editar rutina' : 'Nueva rutina'} onBack={onBack} action={<Pressable accessibilityRole="button" accessibilityLabel="Guardar rutina" disabled={disabled} onPress={save}><Text style={[styles.save, disabled && styles.disabled]}>Guardar</Text></Pressable>} />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
       <Text style={styles.label}>NOMBRE</Text>
       <TextInput accessibilityLabel="Nombre de la rutina" value={name} onChangeText={setName} placeholder="Ej. Día A · Sentadilla" placeholderTextColor={colors.subtle} style={styles.input} />
@@ -183,7 +197,7 @@ export function CreateRoutineScreen({ onBack, onSaved }: { onBack(): void; onSav
   </View>;
 }
 
-export function RoutineDetailScreen({ routine, onBack, onStart, onDeleted }: { routine: Routine; onBack(): void; onStart(): void; onDeleted(): void }) {
+export function RoutineDetailScreen({ routine, onBack, onStart, onDeleted, onEdit }: { routine: Routine; onBack(): void; onStart(): void; onDeleted(): void; onEdit(): void }) {
   const { duplicateRoutine, deleteRoutine } = useAppStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const showRpe = usesRpe(routine.effortMode);
@@ -191,7 +205,10 @@ export function RoutineDetailScreen({ routine, onBack, onStart, onDeleted }: { r
   const remove = () => { deleteRoutine(routine.id); setConfirmDelete(false); onDeleted(); };
 
   return <View style={styles.fill}>
-    <TopBar title={routine.name} eyebrow={`${days[routine.day - 1].toUpperCase()} · ${effortModeLabel(routine.effortMode)}`} onBack={onBack} action={<Pressable accessibilityRole="button" accessibilityLabel="Duplicar rutina" onPress={() => duplicateRoutine(routine.id)}><Text style={styles.muted}>Duplicar</Text></Pressable>} />
+    <TopBar title={routine.name} eyebrow={`${days[routine.day - 1].toUpperCase()} · ${effortModeLabel(routine.effortMode)}`} onBack={onBack} action={<View style={styles.topActions}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Editar rutina" onPress={onEdit}><Text style={styles.muted}>Editar</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Duplicar rutina" onPress={() => duplicateRoutine(routine.id)}><Text style={styles.muted}>Duplicar</Text></Pressable>
+    </View>} />
     <View style={styles.cta}><PrimaryButton title="Iniciar entrenamiento" onPress={onStart} /></View>
     <ScrollView contentContainerStyle={styles.content}>
       {routine.exercises.map(exercise => <View key={exercise.id} style={styles.exerciseBlock}>
@@ -227,6 +244,7 @@ const styles = StyleSheet.create({
   setEditor: { borderWidth: 1, borderTopWidth: 0, borderColor: colors.orange, borderBottomLeftRadius: 12, borderBottomRightRadius: 12, padding: 12, gap: 10, backgroundColor: '#0f0f0f' }, editorHint: { color: colors.dim, fontSize: 11, lineHeight: 16 }, draftSet: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 7 }, setTitle: { color: colors.orange, fontSize: 9, fontWeight: '800', letterSpacing: 1.3 }, draftFields: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, draftField: { width: 72, gap: 4 }, draftLabel: { color: colors.dim, fontSize: 8, height: 20 }, draftInput: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingVertical: 9, paddingHorizontal: 6, color: colors.text, textAlign: 'center', fontFamily: 'monospace' },
   repsRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 3 }, repsRangeInput: { flex: 1, paddingHorizontal: 2 }, repsDash: { color: colors.dim, fontSize: 12, fontWeight: '700' },
   save: { color: colors.orange, fontWeight: '700' }, disabled: { color: colors.subtle }, warning: { color: colors.warning, fontSize: 12 }, cta: { paddingHorizontal: 20, paddingBottom: 8 }, exerciseBlock: { gap: 8 }, rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   tableHead: { flexDirection: 'row', paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: colors.border }, tableRow: { flexDirection: 'row', paddingVertical: 7 }, setNo: { width: 42, color: colors.dim, fontFamily: 'monospace', fontSize: 11 }, col: { flex: 1, color: colors.dim, fontFamily: 'monospace', fontSize: 11 }, colValue: { flex: 1, color: colors.text, fontFamily: 'monospace', fontSize: 13 }, effortCol: { width: 42, color: colors.dim, fontFamily: 'monospace', fontSize: 11 }, effortValue: { width: 42, color: colors.text, fontFamily: 'monospace', fontSize: 13 }, warmup: { color: colors.warning },
   delete: { padding: 16, alignItems: 'center' }, deleteText: { color: colors.danger, fontSize: 13 },
 });

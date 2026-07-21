@@ -5,7 +5,7 @@ export function screenForTab(tab: Tab): Screen {
 }
 
 export function tabForScreen(screen: Screen): Tab {
-  if (screen === 'history') return 'history';
+  if (screen === 'history' || screen === 'session-detail') return 'history';
   if (screen === 'profile' || screen === 'exercise-library' || screen === 'exercise-detail') return 'profile';
   return 'training';
 }

@@ -66,3 +66,11 @@ export function bestEstimated1RM(history: WorkoutHistory[], exerciseId: string, 
     return !best || estimated1RM > best.estimated1RM ? { ...entry, estimated1RM } : best;
   }, null);
 }
+
+export type PreviousSetPerformance = { weight: string; reps: string; rpe: string; rir: string };
+
+export function previousSetPerformance(history: WorkoutHistory[], exerciseId: string, setIndex: number): PreviousSetPerformance | null {
+  const session = history.find(item => item.exercises.some(exercise => exercise.exerciseId === exerciseId));
+  const set = session?.exercises.find(exercise => exercise.exerciseId === exerciseId)?.sets[setIndex];
+  return set ? { weight: set.weight, reps: set.reps, rpe: set.rpe, rir: set.rir } : null;
+}

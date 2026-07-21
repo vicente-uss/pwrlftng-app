@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bestByRepCount, bestEstimated1RM, bestSessionVolume, bestSet, heaviestWeight } from '@/src/domain/records';
+import { bestByRepCount, bestEstimated1RM, bestSessionVolume, bestSet, heaviestWeight, previousSetPerformance } from '@/src/domain/records';
 import { ActiveExercise, WorkoutHistory } from '@/src/domain/types';
 
 function makeExercise(exerciseId: string, sets: Partial<ActiveExercise['sets'][number]>[]): ActiveExercise {
@@ -98,5 +98,36 @@ describe('records', () => {
     expect(bestSessionVolume(history, 'bench')).toBeNull();
     expect(bestByRepCount(history, 'bench')).toEqual([]);
     expect(bestEstimated1RM(history, 'bench')).toBeNull();
+  });
+});
+
+describe('previousSetPerformance', () => {
+  const recentFirst: WorkoutHistory[] = [
+    makeSession({
+      id: 'session-2',
+      date: '2026-07-08T00:00:00.000Z',
+      exercises: [makeExercise('squat', [
+        { weight: '105', reps: '5' },
+        { weight: '120', reps: '1' },
+      ])],
+    }),
+    makeSession({
+      id: 'session-1',
+      date: '2026-07-01T00:00:00.000Z',
+      exercises: [makeExercise('squat', [
+        { weight: '100', reps: '5' },
+        { weight: '110', reps: '3' },
+      ])],
+    }),
+  ];
+
+  it('devuelve el set en la misma posición de la sesión más reciente con ese ejercicio', () => {
+    expect(previousSetPerformance(recentFirst, 'squat', 0)).toEqual({ weight: '105', reps: '5', rpe: '', rir: '' });
+    expect(previousSetPerformance(recentFirst, 'squat', 1)).toEqual({ weight: '120', reps: '1', rpe: '', rir: '' });
+  });
+
+  it('devuelve null si el índice no existe en esa sesión o el ejercicio nunca se registró', () => {
+    expect(previousSetPerformance(recentFirst, 'squat', 5)).toBeNull();
+    expect(previousSetPerformance(recentFirst, 'bench', 0)).toBeNull();
   });
 });

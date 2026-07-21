@@ -3,21 +3,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, ConfirmDialog, PrimaryButton, TopBar, formatDate } from '@/src/components/ui';
 import { DEFAULT_BLOCK, GOAL_OPTIONS, REST_PRESETS, formatRestDuration, isPresetRest, parseRestDuration } from '@/src/domain/profileOptions';
-import { Profile } from '@/src/domain/types';
+import { effortModeLabel, usesRir, usesRpe } from '@/src/domain/training';
+import { Profile, WorkoutHistory } from '@/src/domain/types';
 import { useAppStore } from '@/src/store/AppStore';
 import { colors, condensed } from '@/src/theme';
 
-export function HistoryScreen() {
+export function HistoryScreen({ onSession, onExercise }: { onSession(session: WorkoutHistory): void; onExercise(exerciseId: string): void }) {
   const { history } = useAppStore();
   const records = useMemo(() => {
-    const map = new Map<string, { name: string; max: number; e1rm: number; sessions: number }>();
+    const map = new Map<string, { exerciseId: string; name: string; max: number; e1rm: number; sessions: number }>();
     history.forEach(session => session.exercises.forEach(exercise => {
       const working = exercise.sets.filter(set => set.completed && set.type === 'working');
       if (!working.length) return;
       const max = Math.max(...working.map(set => Number(set.weight) || 0));
       const e1rm = Math.max(...working.map(set => Math.round((Number(set.weight) || 0) * (1 + (Number(set.reps) || 0) / 30))));
       const previous = map.get(exercise.exerciseId);
-      map.set(exercise.exerciseId, { name: exercise.name, max: Math.max(previous?.max ?? 0, max), e1rm: Math.max(previous?.e1rm ?? 0, e1rm), sessions: (previous?.sessions ?? 0) + 1 });
+      map.set(exercise.exerciseId, { exerciseId: exercise.exerciseId, name: exercise.name, max: Math.max(previous?.max ?? 0, max), e1rm: Math.max(previous?.e1rm ?? 0, e1rm), sessions: (previous?.sessions ?? 0) + 1 });
     }));
     return [...map.values()];
   }, [history]);
@@ -28,18 +29,53 @@ export function HistoryScreen() {
       <Text style={styles.section}>SESIONES RECIENTES</Text>
       {history.map(session => {
         const exerciseNotes = session.exercises.filter(exercise => exercise.notes.trim());
-        return <Card key={session.id}>
-          <View style={styles.between}><View style={styles.grow}><Text style={styles.strong}>{session.routineName}</Text><Text style={styles.dim}>{formatDate(session.date)} · {Math.round(session.durationSeconds / 60)} min · {session.setsCompleted} {session.setsCompleted === 1 ? 'serie' : 'series'}</Text></View><Text style={styles.orange}>{session.totalVolume.toLocaleString('es-CL')}kg</Text></View>
-          <Text numberOfLines={1} style={styles.exerciseList}>{session.exercises.map(item => item.name).join(' · ')}</Text>
-          {session.notes ? <View style={styles.note}><Text style={styles.noteLabel}>NOTA DE LA SESIÓN</Text><Text style={styles.noteText}>{session.notes}</Text></View> : null}
-          {exerciseNotes.map(exercise => <View key={exercise.id} style={styles.exerciseNote}><Text style={styles.exerciseNoteName}>{exercise.name}</Text><Text style={styles.noteText}>{exercise.notes}</Text></View>)}
-        </Card>;
+        return <Pressable accessibilityRole="button" accessibilityLabel={`Ver detalle de ${session.routineName}, ${formatDate(session.date)}`} key={session.id} onPress={() => onSession(session)}>
+          <Card>
+            <View style={styles.between}><View style={styles.grow}><Text style={styles.strong}>{session.routineName}</Text><Text style={styles.dim}>{formatDate(session.date)} · {Math.round(session.durationSeconds / 60)} min · {session.setsCompleted} {session.setsCompleted === 1 ? 'serie' : 'series'}</Text></View><Text style={styles.orange}>{session.totalVolume.toLocaleString('es-CL')}kg</Text></View>
+            <Text numberOfLines={1} style={styles.exerciseList}>{session.exercises.map(item => item.name).join(' · ')}</Text>
+            {session.notes ? <View style={styles.note}><Text style={styles.noteLabel}>NOTA DE LA SESIÓN</Text><Text style={styles.noteText}>{session.notes}</Text></View> : null}
+            {exerciseNotes.map(exercise => <View key={exercise.id} style={styles.exerciseNote}><Text style={styles.exerciseNoteName}>{exercise.name}</Text><Text style={styles.noteText}>{exercise.notes}</Text></View>)}
+          </Card>
+        </Pressable>;
       })}
       {history.length === 0 ? <Card><Text style={styles.dim}>Termina tu primer entrenamiento para ver el historial.</Text></Card> : null}
 
       <Text style={styles.section}>RÉCORDS POR EJERCICIO</Text>
-      {records.map(record => <View key={record.name} style={styles.record}><View style={styles.recordIcon}><Ionicons name="trophy-outline" color={colors.orange} size={17} /></View><View style={styles.grow}><Text style={styles.strong}>{record.name}</Text><Text style={styles.dim}>{record.sessions} {record.sessions === 1 ? 'sesión registrada' : 'sesiones registradas'}</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.max}kg</Text><Text style={styles.metricLabel}>MÁXIMO</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.e1rm}kg</Text><Text style={styles.metricLabel}>E1RM</Text></View></View>)}
+      {records.map(record => <Pressable accessibilityRole="button" accessibilityLabel={`Ver ejercicio ${record.name}`} key={record.exerciseId} onPress={() => onExercise(record.exerciseId)} style={styles.record}><View style={styles.recordIcon}><Ionicons name="trophy-outline" color={colors.orange} size={17} /></View><View style={styles.grow}><Text style={styles.strong}>{record.name}</Text><Text style={styles.dim}>{record.sessions} {record.sessions === 1 ? 'sesión registrada' : 'sesiones registradas'}</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.max}kg</Text><Text style={styles.metricLabel}>MÁXIMO</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.e1rm}kg</Text><Text style={styles.metricLabel}>E1RM</Text></View></Pressable>)}
       {records.length === 0 ? <Text style={styles.emptyHint}>Tus récords aparecerán después de completar series de trabajo.</Text> : null}
+    </ScrollView>
+  </View>;
+}
+
+export function SessionDetailScreen({ session, onBack, onExercise }: { session: WorkoutHistory; onBack(): void; onExercise(exerciseId: string): void }) {
+  const showRpe = usesRpe(session.effortMode);
+  const showRir = usesRir(session.effortMode);
+
+  return <View style={styles.fill}>
+    <TopBar title={session.routineName} eyebrow={`${formatDate(session.date)} · ${effortModeLabel(session.effortMode)}`} onBack={onBack} />
+    <ScrollView contentContainerStyle={styles.content}>
+      <View style={styles.between}>
+        <Text style={styles.dim}>{Math.round(session.durationSeconds / 60)} min · {session.setsCompleted} {session.setsCompleted === 1 ? 'serie' : 'series'}</Text>
+        <Text style={styles.orange}>{session.totalVolume.toLocaleString('es-CL')}kg</Text>
+      </View>
+      {session.notes ? <Card><Text style={styles.noteLabel}>NOTA DE LA SESIÓN</Text><Text style={styles.noteText}>{session.notes}</Text></Card> : null}
+      {session.exercises.map(exercise => <View key={exercise.id} style={styles.exerciseBlock}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Ver ejercicio ${exercise.name}`} onPress={() => onExercise(exercise.exerciseId)} style={styles.between}>
+          <Text style={styles.strong}>{exercise.name}</Text>
+          <Text style={styles.dim}>{exercise.muscle}</Text>
+        </Pressable>
+        <Card>
+          <View style={styles.tableHead}><Text style={styles.setNo}>SET</Text><Text style={styles.col}>PESO</Text><Text style={styles.col}>REPS</Text>{showRpe && <Text style={styles.effortCol}>RPE</Text>}{showRir && <Text style={styles.effortCol}>RIR</Text>}</View>
+          {exercise.sets.map((set, index) => <View key={set.id} style={styles.tableRow}>
+            <Text style={[styles.setNo, set.type === 'warmup' && styles.warmup]}>{set.type === 'warmup' ? 'W' : exercise.sets.slice(0, index + 1).filter(item => item.type === 'working').length}</Text>
+            <Text style={styles.colValue}>{set.weight}kg</Text>
+            <Text style={styles.colValue}>{set.reps}</Text>
+            {showRpe && <Text style={styles.effortValue}>{set.rpe || '—'}</Text>}
+            {showRir && <Text style={styles.effortValue}>{set.rir || '—'}</Text>}
+          </View>)}
+        </Card>
+        {exercise.notes ? <Text style={styles.noteText}>{exercise.notes}</Text> : null}
+      </View>)}
     </ScrollView>
   </View>;
 }
@@ -161,6 +197,15 @@ const styles = StyleSheet.create({
   metric: { color: colors.text, fontSize: 15, fontWeight: '800', fontFamily: 'monospace' },
   metricLabel: { color: colors.dim, fontSize: 8, fontWeight: '700', letterSpacing: 1 },
   emptyHint: { color: colors.subtle, fontSize: 11, lineHeight: 16 },
+  exerciseBlock: { gap: 8 },
+  tableHead: { flexDirection: 'row', paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: colors.border },
+  tableRow: { flexDirection: 'row', paddingVertical: 7 },
+  setNo: { width: 42, color: colors.dim, fontFamily: 'monospace', fontSize: 11 },
+  col: { flex: 1, color: colors.dim, fontFamily: 'monospace', fontSize: 11 },
+  colValue: { flex: 1, color: colors.text, fontFamily: 'monospace', fontSize: 13 },
+  effortCol: { width: 42, color: colors.dim, fontFamily: 'monospace', fontSize: 11 },
+  effortValue: { width: 42, color: colors.text, fontFamily: 'monospace', fontSize: 13 },
+  warmup: { color: colors.warning },
   profileHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 48, height: 48, borderRadius: 14, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' },
   profileName: { color: colors.text, fontSize: 18, fontWeight: '800', fontFamily: condensed },

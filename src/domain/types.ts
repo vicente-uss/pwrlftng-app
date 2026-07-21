@@ -1,5 +1,5 @@
 export type Tab = 'training' | 'history' | 'profile';
-export type Screen = 'login' | 'training' | 'create-routine' | 'routine-detail' | 'active-session' | 'summary' | 'history' | 'profile';
+export type Screen = 'login' | 'training' | 'create-routine' | 'edit-routine' | 'routine-detail' | 'active-session' | 'summary' | 'history' | 'session-detail' | 'profile' | 'exercise-library' | 'exercise-detail';
 export type SetType = 'warmup' | 'working';
 export type EffortMode = 'rpe' | 'rir' | 'both' | 'none';
 

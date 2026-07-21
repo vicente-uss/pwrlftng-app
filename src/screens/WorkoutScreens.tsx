@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { BackHandler, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PrCelebration } from '@/src/components/PrCelebration';
 import { Card, ConfirmDialog, PrimaryButton, formatDate, formatTime } from '@/src/components/ui';
 import { REST_PRESETS, formatRestDuration, isPresetRest, parseRestDuration } from '@/src/domain/profileOptions';
+import { previousSetPerformance } from '@/src/domain/records';
 import { EffortMode } from '@/src/domain/types';
 import { EFFORT_MODES, effortModeLabel, formatRepRange, usesRir, usesRpe } from '@/src/domain/training';
 import { useAppStore } from '@/src/store/AppStore';
@@ -68,6 +70,7 @@ function SettingsSheet({ visible, effortMode, restSeconds, onClose, onSave }: { 
 export function ActiveSessionScreen({ onCancel, onFinished }: { onCancel(): void; onFinished(): void }) {
   const store = useAppStore();
   const session = store.activeSession;
+  const { lastPrEvent, clearPrEvent } = store;
   const [elapsed, setElapsed] = useState(session ? Math.floor((Date.now() - session.startedAt) / 1000) : 0);
   const [rest, setRest] = useState(0);
   const [confirmation, setConfirmation] = useState<'cancel' | 'finish' | null>(null);
@@ -93,6 +96,12 @@ export function ActiveSessionScreen({ onCancel, onFinished }: { onCancel(): void
     return () => subscription.remove();
   }, [session]);
 
+  useEffect(() => {
+    if (!lastPrEvent) return;
+    const timeout = setTimeout(() => clearPrEvent(), 2500);
+    return () => clearTimeout(timeout);
+  }, [lastPrEvent, clearPrEvent]);
+
   if (!session) return <SafeAreaView style={styles.page}><View style={styles.empty}><Text style={styles.title}>No hay sesión activa</Text><PrimaryButton title="Volver" onPress={onCancel} /></View></SafeAreaView>;
 
   const showRpe = usesRpe(session.effortMode);
@@ -112,6 +121,7 @@ export function ActiveSessionScreen({ onCancel, onFinished }: { onCancel(): void
   };
 
   return <SafeAreaView style={styles.page}>
+    <PrCelebration event={lastPrEvent} />
     <View style={styles.header}>
       <Pressable accessibilityRole="button" accessibilityLabel="Descartar entreno" onPress={() => setConfirmation('cancel')}><Text style={styles.discard}>Descartar entreno</Text></Pressable>
       <Text style={styles.timer}>{formatTime(elapsed)}</Text>
@@ -136,15 +146,23 @@ export function ActiveSessionScreen({ onCancel, onFinished }: { onCancel(): void
       {session.exercises.length === 0 ? <Card><Text style={styles.cardTitle}>Entrenamiento libre</Text><Text style={styles.muted}>Agrega el primer ejercicio para comenzar a registrar.</Text><PrimaryButton title="Agregar ejercicio" onPress={() => setExerciseSheet(true)} /></Card> : null}
 
       {session.exercises.map(exercise => {
-        const lastExercise = store.history.find(item => item.exercises.some(saved => saved.exerciseId === exercise.exerciseId))?.exercises.find(saved => saved.exerciseId === exercise.exerciseId);
         return <View key={exercise.id} style={styles.exerciseBlock}>
           <View style={styles.exerciseHead}><View><Text style={styles.exerciseName}>{exercise.name}</Text><Text style={styles.dim}>{exercise.muscle}</Text></View><Text style={styles.dim}>{exercise.sets.filter(set => set.completed).length}/{exercise.sets.length}</Text></View>
           <View style={styles.tableHead}><Text style={styles.setCol}>SET</Text><Text style={styles.flexCol}>KG</Text><Text style={styles.tinyCol}>×</Text><Text style={styles.repCol}>REPS</Text>{showRpe ? <Text style={styles.effortCol}>RPE</Text> : null}{showRir ? <Text style={styles.effortCol}>RIR</Text> : null}<View style={styles.checkCol} /></View>
           {exercise.sets.map((set, index) => {
-            const previous = lastExercise?.sets[index];
+            const previous = previousSetPerformance(store.history, exercise.exerciseId, index);
             const setNumber = set.type === 'warmup' ? 'calentamiento' : exercise.sets.slice(0, index + 1).filter(item => item.type === 'working').length;
             const previousEffort = `${previous?.rpe ? ` · RPE ${previous.rpe}` : ''}${previous?.rir ? ` · RIR ${previous.rir}` : ''}`;
             return <View key={set.id}>
+              <View style={styles.setMeta}>
+                <Text style={styles.metaLabel}>OBJETIVO:</Text>
+                <Text style={styles.metaValue}>{formatRepRange(set.targetRepsMin, set.targetRepsMax)} reps</Text>
+                {previous ? <>
+                  <Text style={styles.metaDivider}>·</Text>
+                  <Text style={styles.metaLabel}>ANTERIOR:</Text>
+                  <Text style={styles.metaValue}>{previous.weight}kg × {previous.reps} reps{previousEffort}</Text>
+                </> : null}
+              </View>
               <View style={[styles.setRow, set.completed && styles.completed]}>
                 <Pressable accessibilityRole="button" accessibilityLabel={`Serie ${setNumber}. Mantén presionado para eliminar`} delayLongPress={450} onLongPress={() => setDeleteTarget({ exerciseId: exercise.id, setId: set.id, label: `${exercise.name}, serie ${setNumber}` })} style={styles.setPressable}><Text style={[styles.setColText, set.type === 'warmup' && styles.warmup]}>{set.type === 'warmup' ? 'W' : setNumber}</Text></Pressable>
                 <TextInput accessibilityLabel={`Peso ${exercise.name}, serie ${setNumber}`} value={set.weight} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'weight', value)} editable={!set.completed} selectTextOnFocus keyboardType="decimal-pad" style={[styles.input, styles.flexCol]} />
@@ -154,8 +172,6 @@ export function ActiveSessionScreen({ onCancel, onFinished }: { onCancel(): void
                 {showRir ? <TextInput accessibilityLabel={`RIR ${exercise.name}, serie ${setNumber}`} value={set.rir} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'rir', value)} editable={!set.completed} selectTextOnFocus keyboardType="decimal-pad" placeholder="—" placeholderTextColor={colors.dim} style={[styles.input, styles.effortInput]} /> : null}
                 <Pressable accessibilityRole="checkbox" accessibilityLabel={`${set.completed ? 'Desmarcar' : 'Completar'} ${exercise.name}, serie ${setNumber}`} accessibilityState={{ checked: set.completed }} onPress={() => { const shouldRest = !set.completed; store.toggleActiveSet(exercise.id, set.id); if (shouldRest) setRest(session.restSeconds); }} style={[styles.check, set.completed && styles.checkDone]}><Ionicons name="checkmark" size={15} color={set.completed ? colors.canvas : colors.subtle} /></Pressable>
               </View>
-              <Text style={styles.target}>Objetivo: {formatRepRange(set.targetRepsMin, set.targetRepsMax)} reps</Text>
-              {previous ? <Text style={styles.last}>Última vez: {previous.weight}kg × {previous.reps}{previousEffort}</Text> : null}
             </View>;
           })}
           <Pressable accessibilityRole="button" accessibilityLabel={`Agregar serie a ${exercise.name}`} onPress={() => store.addActiveSet(exercise.id)}><Text style={styles.addSet}>+ Agregar serie</Text></Pressable>
@@ -211,7 +227,7 @@ const styles = StyleSheet.create({
   exerciseHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   exerciseName: { color: colors.text, fontSize: 17, fontWeight: '700' },
   tableHead: { flexDirection: 'row', alignItems: 'center' },
-  setRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
+  setRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   completed: { opacity: 0.45 },
   setCol: { width: 24, color: colors.dim, textAlign: 'center', fontSize: 10, fontFamily: 'monospace' },
   setPressable: { width: 24, minHeight: 34, alignItems: 'center', justifyContent: 'center' },
@@ -226,8 +242,10 @@ const styles = StyleSheet.create({
   check: { width: 30, height: 30, borderRadius: 9, borderWidth: 1, borderColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center' },
   checkDone: { backgroundColor: colors.success, borderColor: colors.success },
   warmup: { color: colors.warning },
-  target: { color: colors.orange, fontSize: 9, fontFamily: 'monospace', marginLeft: 29, marginTop: 3 },
-  last: { color: colors.subtle, fontSize: 9, fontFamily: 'monospace', marginLeft: 29, marginTop: 2 },
+  setMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginLeft: 29, marginTop: 10, paddingVertical: 3 },
+  metaLabel: { color: colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
+  metaValue: { color: colors.muted, fontSize: 12, fontFamily: 'monospace' },
+  metaDivider: { color: colors.subtle, fontSize: 12 },
   addSet: { color: colors.orange, fontSize: 12, marginLeft: 29, marginTop: 10 },
   longPressHint: { color: colors.subtle, fontSize: 9, marginLeft: 29, marginTop: 2 },
   notesInput: { marginTop: 10, minHeight: 48, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 11, padding: 12, color: colors.text, fontSize: 13, textAlignVertical: 'top' },

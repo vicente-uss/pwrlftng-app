@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,10 +8,11 @@ import { Routine } from '@/src/domain/types';
 import { effortModeLabel } from '@/src/domain/training';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
 import { signInWithEmail, signUpWithEmail } from '@/src/services/authService';
+import { generateInviteCode, redeemCoachCode } from '@/src/services/coachService';
 import { useAppStore } from '@/src/store/AppStore';
 import { colors, condensed, shortDays } from '@/src/theme';
 
-export function LoginScreen({ onLogin, onDemo }: { onLogin(): Promise<void>; onDemo(): void }) {
+export function LoginScreen({ onLogin, onSignedUp, onDemo }: { onLogin(): Promise<void>; onSignedUp(): Promise<void>; onDemo(): void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,7 +38,7 @@ export function LoginScreen({ onLogin, onDemo }: { onLogin(): Promise<void>; onD
       const session = mode === 'login'
         ? await signInWithEmail(email, password)
         : await signUpWithEmail(email, password);
-      if (session) await onLogin();
+      if (session) await (mode === 'signup' ? onSignedUp() : onLogin());
       else setError('Revisa tu correo para confirmar la cuenta y luego inicia sesión.');
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'No pudimos conectar con tu cuenta.';
@@ -61,6 +63,100 @@ export function LoginScreen({ onLogin, onDemo }: { onLogin(): Promise<void>; onD
         </View>
       </View>
     </KeyboardAvoidingView>
+  </SafeAreaView>;
+}
+
+export function AccountTypeScreen({ onDone }: { onDone(): void }) {
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const [linked, setLinked] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [generateBusy, setGenerateBusy] = useState(false);
+  const [generateError, setGenerateError] = useState('');
+  const [generatedCode, setGeneratedCode] = useState('');
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const openLinkCoach = () => {
+    setLinkOpen(true);
+    setLinkError('');
+  };
+
+  const redeem = async () => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    setLinkBusy(true);
+    setLinkError('');
+    try {
+      await redeemCoachCode(trimmed);
+      setLinked(true);
+    } catch (cause) {
+      setLinkError(cause instanceof Error ? cause.message : 'No pudimos vincular el código. Inténtalo otra vez.');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  const becomeCoach = async () => {
+    setCoachOpen(true);
+    setGenerateBusy(true);
+    setGenerateError('');
+    try {
+      setGeneratedCode(await generateInviteCode());
+    } catch (cause) {
+      setGenerateError(cause instanceof Error ? cause.message : 'No pudimos generar tu código. Podrás generarlo luego desde tu perfil.');
+    } finally {
+      setGenerateBusy(false);
+    }
+  };
+
+  const copyCode = async () => {
+    if (!generatedCode) return;
+    await Clipboard.setStringAsync(generatedCode);
+    setCodeCopied(true);
+  };
+
+  return <SafeAreaView style={styles.login}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.welcomeContent}>
+      <Brand compact />
+      <Text style={styles.welcomeTitle}>¿Cómo vas a usar PWRLFTNG?</Text>
+      <Text style={styles.welcomeSubtitle}>Puedes cambiar esto en cualquier momento desde tu perfil.</Text>
+
+      <Card>
+        <Text style={styles.strong}>Quiero entrenar</Text>
+        <Text style={styles.dim}>Registra tus rutinas y sesiones. Podrás vincularte con un coach después.</Text>
+        <PrimaryButton title="Empezar a entrenar" onPress={onDone} light />
+      </Card>
+
+      <Card>
+        <Text style={styles.strong}>Ya tengo coach</Text>
+        <Text style={styles.dim}>Ingresa el código de invitación que te compartió tu coach.</Text>
+        {linkOpen ? (linked ? <Text style={styles.success}>¡Cuenta vinculada con tu coach!</Text> : <>
+          <TextInput accessibilityLabel="Código de invitación del coach" value={code} onChangeText={setCode} placeholder="Código de invitación" placeholderTextColor={colors.subtle} autoCapitalize="characters" style={styles.input} />
+          {linkError ? <Text style={styles.error}>{linkError}</Text> : null}
+          <PrimaryButton title={linkBusy ? 'Vinculando…' : 'Vincular'} onPress={redeem} disabled={linkBusy || !code.trim()} />
+        </>) : <PrimaryButton title="Ya tengo coach" onPress={openLinkCoach} light />}
+      </Card>
+
+      <Card>
+        <Text style={styles.strong}>Soy coach</Text>
+        <Text style={styles.dim}>Genera un código para invitar a tu primer atleta.</Text>
+        {coachOpen ? <>
+          {generateBusy ? <Text style={styles.dim}>Generando código…</Text> : null}
+          {generateError ? <Text style={styles.error}>{generateError}</Text> : null}
+          {generatedCode ? <>
+            <Text style={styles.code}>{generatedCode}</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Copiar código" onPress={copyCode} style={styles.copyButton}>
+              <Ionicons name={codeCopied ? 'checkmark' : 'copy-outline'} color={colors.text} size={16} />
+              <Text style={styles.copyButtonText}>{codeCopied ? 'Copiado' : 'Copiar código'}</Text>
+            </Pressable>
+          </> : null}
+        </> : <PrimaryButton title="Soy coach" onPress={becomeCoach} light />}
+      </Card>
+
+      <PrimaryButton title="Continuar a Entreno" onPress={onDone} />
+    </ScrollView>
   </SafeAreaView>;
 }
 
@@ -129,4 +225,12 @@ const styles = StyleSheet.create({
   routineName: { color: colors.text, fontWeight: '700', fontSize: 15 },
   historyButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
   historyIcon: { width: 40, height: 40, borderRadius: 11, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' },
+  welcomeContent: { padding: 24, paddingTop: 40, gap: 14, paddingBottom: 40 },
+  welcomeTitle: { color: colors.text, fontSize: 26, fontWeight: '900', fontFamily: condensed, marginTop: 8 },
+  welcomeSubtitle: { color: colors.dim, fontSize: 12, lineHeight: 17, marginBottom: 4 },
+  strong: { color: colors.text, fontWeight: '700', fontSize: 15 },
+  success: { color: colors.success, fontSize: 13, fontWeight: '700' },
+  code: { color: colors.text, fontSize: 26, fontWeight: '900', fontFamily: condensed, letterSpacing: 3, textAlign: 'center' },
+  copyButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: colors.elevated, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14 },
+  copyButtonText: { color: colors.text, fontWeight: '700', fontSize: 12 },
 });

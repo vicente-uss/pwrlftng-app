@@ -30,7 +30,9 @@ export function PrCelebration({ event }: { event: PrEvent | null }) {
 
   const message = displayed.kind === 'weight'
     ? `¡Nuevo récord de peso en ${displayed.exerciseName}!`
-    : `¡Nuevo récord de repeticiones en ${displayed.exerciseName}!`;
+    : displayed.kind === 'reps'
+      ? `¡Nuevo récord de repeticiones en ${displayed.exerciseName}!`
+      : `¡Nuevo récord de eficiencia en ${displayed.exerciseName}! Menos esfuerzo percibido para el mismo peso y reps.`;
 
   return <Animated.View pointerEvents="none" style={[styles.wrap, animatedStyle]}>
     <View style={styles.badge}><Ionicons name="trophy" color={colors.background} size={20} /></View>

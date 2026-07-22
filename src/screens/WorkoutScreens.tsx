@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { BackHandler, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -77,6 +77,15 @@ export function ActiveSessionScreen({ onCancel, onFinished }: { onCancel(): void
   const [exerciseSheet, setExerciseSheet] = useState(false);
   const [settingsSheet, setSettingsSheet] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const exerciseOffsets = useRef(new Map<string, number>());
+  const rowOffsets = useRef(new Map<string, number>());
+
+  const scrollToSet = (exerciseId: string, setId: string) => {
+    const blockY = exerciseOffsets.current.get(exerciseId) ?? 0;
+    const rowY = rowOffsets.current.get(setId) ?? 0;
+    scrollRef.current?.scrollTo({ y: Math.max(0, blockY + rowY - 120), animated: true });
+  };
 
   useEffect(() => {
     if (!session) return;
@@ -142,18 +151,19 @@ export function ActiveSessionScreen({ onCancel, onFinished }: { onCancel(): void
       <Pressable accessibilityRole="button" accessibilityLabel="Omitir descanso" onPress={() => setRest(0)}><Ionicons name="close" color={colors.muted} size={20} /></Pressable>
     </View> : null}
 
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+    <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
       {session.exercises.length === 0 ? <Card><Text style={styles.cardTitle}>Entrenamiento libre</Text><Text style={styles.muted}>Agrega el primer ejercicio para comenzar a registrar.</Text><PrimaryButton title="Agregar ejercicio" onPress={() => setExerciseSheet(true)} /></Card> : null}
 
       {session.exercises.map(exercise => {
-        return <View key={exercise.id} style={styles.exerciseBlock}>
+        return <View key={exercise.id} style={styles.exerciseBlock} onLayout={event => exerciseOffsets.current.set(exercise.id, event.nativeEvent.layout.y)}>
           <View style={styles.exerciseHead}><View><Text style={styles.exerciseName}>{exercise.name}</Text><Text style={styles.dim}>{exercise.muscle}</Text></View><Text style={styles.dim}>{exercise.sets.filter(set => set.completed).length}/{exercise.sets.length}</Text></View>
           <View style={styles.tableHead}><Text style={styles.setCol}>SET</Text><Text style={styles.flexCol}>KG</Text><Text style={styles.tinyCol}>×</Text><Text style={styles.repCol}>REPS</Text>{showRpe ? <Text style={styles.effortCol}>RPE</Text> : null}{showRir ? <Text style={styles.effortCol}>RIR</Text> : null}<View style={styles.checkCol} /></View>
           {exercise.sets.map((set, index) => {
             const previous = previousSetPerformance(store.history, exercise.exerciseId, index);
             const setNumber = set.type === 'warmup' ? 'calentamiento' : exercise.sets.slice(0, index + 1).filter(item => item.type === 'working').length;
             const previousEffort = `${previous?.rpe ? ` · RPE ${previous.rpe}` : ''}${previous?.rir ? ` · RIR ${previous.rir}` : ''}`;
-            return <View key={set.id}>
+            const focusRow = () => scrollToSet(exercise.id, set.id);
+            return <View key={set.id} onLayout={event => rowOffsets.current.set(set.id, event.nativeEvent.layout.y)}>
               <View style={styles.setMeta}>
                 <Text style={styles.metaLabel}>OBJETIVO:</Text>
                 <Text style={styles.metaValue}>{formatRepRange(set.targetRepsMin, set.targetRepsMax)} reps</Text>
@@ -165,11 +175,11 @@ export function ActiveSessionScreen({ onCancel, onFinished }: { onCancel(): void
               </View>
               <View style={[styles.setRow, set.completed && styles.completed]}>
                 <Pressable accessibilityRole="button" accessibilityLabel={`Serie ${setNumber}. Mantén presionado para eliminar`} delayLongPress={450} onLongPress={() => setDeleteTarget({ exerciseId: exercise.id, setId: set.id, label: `${exercise.name}, serie ${setNumber}` })} style={styles.setPressable}><Text style={[styles.setColText, set.type === 'warmup' && styles.warmup]}>{set.type === 'warmup' ? 'W' : setNumber}</Text></Pressable>
-                <TextInput accessibilityLabel={`Peso ${exercise.name}, serie ${setNumber}`} value={set.weight} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'weight', value)} editable={!set.completed} selectTextOnFocus keyboardType="decimal-pad" style={[styles.input, styles.flexCol]} />
+                <TextInput accessibilityLabel={`Peso ${exercise.name}, serie ${setNumber}`} value={set.weight} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'weight', value)} onFocus={focusRow} editable={!set.completed} selectTextOnFocus keyboardType="decimal-pad" style={[styles.input, styles.flexCol]} />
                 <Text style={styles.tinyCol}>×</Text>
-                <TextInput accessibilityLabel={`Repeticiones realizadas ${exercise.name}, serie ${setNumber}`} value={set.reps} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'reps', value)} editable={!set.completed} selectTextOnFocus keyboardType="number-pad" style={[styles.input, styles.repCol]} />
-                {showRpe ? <TextInput accessibilityLabel={`RPE ${exercise.name}, serie ${setNumber}`} value={set.rpe} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'rpe', value)} editable={!set.completed} selectTextOnFocus keyboardType="decimal-pad" placeholder="—" placeholderTextColor={colors.dim} style={[styles.input, styles.effortInput]} /> : null}
-                {showRir ? <TextInput accessibilityLabel={`RIR ${exercise.name}, serie ${setNumber}`} value={set.rir} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'rir', value)} editable={!set.completed} selectTextOnFocus keyboardType="decimal-pad" placeholder="—" placeholderTextColor={colors.dim} style={[styles.input, styles.effortInput]} /> : null}
+                <TextInput accessibilityLabel={`Repeticiones realizadas ${exercise.name}, serie ${setNumber}`} value={set.reps} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'reps', value)} onFocus={focusRow} editable={!set.completed} selectTextOnFocus keyboardType="number-pad" style={[styles.input, styles.repCol]} />
+                {showRpe ? <TextInput accessibilityLabel={`RPE ${exercise.name}, serie ${setNumber}`} value={set.rpe} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'rpe', value)} onFocus={focusRow} editable={!set.completed} selectTextOnFocus keyboardType="decimal-pad" placeholder="—" placeholderTextColor={colors.dim} style={[styles.input, styles.effortInput]} /> : null}
+                {showRir ? <TextInput accessibilityLabel={`RIR ${exercise.name}, serie ${setNumber}`} value={set.rir} onChangeText={value => store.updateActiveSet(exercise.id, set.id, 'rir', value)} onFocus={focusRow} editable={!set.completed} selectTextOnFocus keyboardType="decimal-pad" placeholder="—" placeholderTextColor={colors.dim} style={[styles.input, styles.effortInput]} /> : null}
                 <Pressable accessibilityRole="checkbox" accessibilityLabel={`${set.completed ? 'Desmarcar' : 'Completar'} ${exercise.name}, serie ${setNumber}`} accessibilityState={{ checked: set.completed }} onPress={() => { const shouldRest = !set.completed; store.toggleActiveSet(exercise.id, set.id); if (shouldRest) setRest(session.restSeconds); }} style={[styles.check, set.completed && styles.checkDone]}><Ionicons name="checkmark" size={15} color={set.completed ? colors.canvas : colors.subtle} /></Pressable>
               </View>
             </View>;

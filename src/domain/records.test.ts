@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bestByRepCount, bestEstimated1RM, bestSessionVolume, bestSet, heaviestWeight, previousSetPerformance } from '@/src/domain/records';
+import { bestByRepCount, bestEstimated1RM, bestRpeAtOrAbove, bestSessionVolume, bestSet, heaviestWeight, previousSetPerformance } from '@/src/domain/records';
 import { ActiveExercise, WorkoutHistory } from '@/src/domain/types';
 
 function makeExercise(exerciseId: string, sets: Partial<ActiveExercise['sets'][number]>[]): ActiveExercise {
@@ -62,7 +62,7 @@ const history: WorkoutHistory[] = [
 
 describe('records', () => {
   it('encuentra el peso más pesado entre series de trabajo completadas', () => {
-    expect(heaviestWeight(history, 'squat')).toEqual({ weight: 120, reps: 1, date: '2026-07-08T00:00:00.000Z' });
+    expect(heaviestWeight(history, 'squat')).toEqual({ weight: 120, reps: 1, date: '2026-07-08T00:00:00.000Z', rpe: null, rir: null });
   });
 
   it('ignora series de calentamiento y series no completadas', () => {
@@ -71,7 +71,7 @@ describe('records', () => {
   });
 
   it('encuentra la mejor serie por peso x reps', () => {
-    expect(bestSet(history, 'squat')).toEqual({ weight: 105, reps: 5, date: '2026-07-08T00:00:00.000Z' });
+    expect(bestSet(history, 'squat')).toEqual({ weight: 105, reps: 5, date: '2026-07-08T00:00:00.000Z', rpe: null, rir: null });
   });
 
   it('encuentra el mejor volumen total en una sola sesión', () => {
@@ -98,6 +98,32 @@ describe('records', () => {
     expect(bestSessionVolume(history, 'bench')).toBeNull();
     expect(bestByRepCount(history, 'bench')).toEqual([]);
     expect(bestEstimated1RM(history, 'bench')).toBeNull();
+  });
+});
+
+describe('bestRpeAtOrAbove', () => {
+  const historyWithRpe: WorkoutHistory[] = [
+    makeSession({
+      id: 'session-1',
+      date: '2026-07-01T00:00:00.000Z',
+      exercises: [makeExercise('squat', [
+        { weight: '100', reps: '5', rpe: '8' },
+        { weight: '100', reps: '6', rpe: '9' },
+        { weight: '90', reps: '5', rpe: '7' },
+      ])],
+    }),
+  ];
+
+  it('devuelve el RPE más bajo entre series que igualan o superan peso y reps', () => {
+    expect(bestRpeAtOrAbove(historyWithRpe, 'squat', 100, 5)).toBe(8);
+  });
+
+  it('devuelve null si ninguna serie anterior iguala o supera ese peso/reps', () => {
+    expect(bestRpeAtOrAbove(historyWithRpe, 'squat', 110, 5)).toBeNull();
+  });
+
+  it('devuelve null si el ejercicio nunca se registró', () => {
+    expect(bestRpeAtOrAbove(historyWithRpe, 'bench', 50, 5)).toBeNull();
   });
 });
 

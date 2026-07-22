@@ -1,14 +1,19 @@
+import { estimateOneRepMax } from '@/src/domain/prFormulas';
 import { WorkoutHistory } from '@/src/domain/types';
 
-export type ExerciseSetEntry = { weight: number; reps: number; date: string };
+export type ExerciseSetEntry = { weight: number; reps: number; date: string; rpe: number | null; rir: number | null };
 export type WeightRecord = ExerciseSetEntry;
 export type VolumeRecord = { volume: number; date: string };
 export type RepCountRecord = { reps: number; weight: number; date: string };
-export type OneRmFormula = (weight: number, reps: number) => number;
+export type OneRmFormula = (weight: number, reps: number, rpe: number | null, rir: number | null) => number;
 export type OneRmRecord = ExerciseSetEntry & { estimated1RM: number };
 
-// Formula pendiente de decisión final (ver 07_avance_desarrollo_beta1). Intercambiable vía el parámetro `formula`.
-export const epley1RM: OneRmFormula = (weight, reps) => (reps <= 1 ? weight : weight * (1 + reps / 30));
+function parseOptionalNumber(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 function completedWorkingSets(history: WorkoutHistory[], exerciseId: string): ExerciseSetEntry[] {
   const entries: ExerciseSetEntry[] = [];
@@ -17,7 +22,13 @@ function completedWorkingSets(history: WorkoutHistory[], exerciseId: string): Ex
       if (exercise.exerciseId !== exerciseId) return;
       exercise.sets.forEach(set => {
         if (set.type !== 'working' || !set.completed) return;
-        entries.push({ weight: Number(set.weight) || 0, reps: Number(set.reps) || 0, date: set.completedAt ?? session.date });
+        entries.push({
+          weight: Number(set.weight) || 0,
+          reps: Number(set.reps) || 0,
+          date: set.completedAt ?? session.date,
+          rpe: parseOptionalNumber(set.rpe),
+          rir: parseOptionalNumber(set.rir),
+        });
       });
     });
   });
@@ -60,11 +71,22 @@ export function bestByRepCount(history: WorkoutHistory[], exerciseId: string): R
   return [...byReps.values()].sort((a, b) => a.reps - b.reps);
 }
 
-export function bestEstimated1RM(history: WorkoutHistory[], exerciseId: string, formula: OneRmFormula = epley1RM): OneRmRecord | null {
+export function bestEstimated1RM(
+  history: WorkoutHistory[],
+  exerciseId: string,
+  formula: OneRmFormula = (weight, reps, rpe, rir) => estimateOneRepMax(exerciseId, weight, reps, rpe, rir),
+): OneRmRecord | null {
   return completedWorkingSets(history, exerciseId).reduce<OneRmRecord | null>((best, entry) => {
-    const estimated1RM = formula(entry.weight, entry.reps);
+    const estimated1RM = formula(entry.weight, entry.reps, entry.rpe, entry.rir);
     return !best || estimated1RM > best.estimated1RM ? { ...entry, estimated1RM } : best;
   }, null);
+}
+
+export function bestRpeAtOrAbove(history: WorkoutHistory[], exerciseId: string, weight: number, reps: number): number | null {
+  const rpes = completedWorkingSets(history, exerciseId)
+    .filter(entry => entry.weight >= weight && entry.reps >= reps && entry.rpe != null)
+    .map(entry => entry.rpe as number);
+  return rpes.length ? Math.min(...rpes) : null;
 }
 
 export type PreviousSetPerformance = { weight: string; reps: string; rpe: string; rir: string };

@@ -7,7 +7,7 @@ import { CoachBlockEditorScreen } from '@/src/screens/CoachBlockEditorScreen';
 import { CoachAthleteDetailScreen, CoachAthletesScreen } from '@/src/screens/CoachScreens';
 import { ExerciseDetailScreen, ExerciseLibraryScreen } from '@/src/screens/ExerciseLibraryScreen';
 import { HistoryScreen, ProfileScreen, SessionDetailScreen } from '@/src/screens/HistoryProfileScreens';
-import { LoginScreen, TrainingScreen } from '@/src/screens/HomeScreens';
+import { AccountTypeScreen, LoginScreen, TrainingScreen } from '@/src/screens/HomeScreens';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
 import { popScreen, pushScreen, replaceScreen, resetScreen, screenForTab, tabForScreen } from '@/src/navigation/navigationState';
 import { CreateRoutineScreen, RoutineDetailScreen } from '@/src/screens/RoutineScreens';
@@ -133,11 +133,16 @@ export function PwrlftngApp() {
     await initializeCloudSync();
     setAuthMode('account');
     reset(activeSession ? 'active-session' : 'training');
+  }} onSignedUp={async () => {
+    await initializeCloudSync();
+    setAuthMode('account');
+    reset('account-type');
   }} onDemo={() => {
     setAuthMode('demo');
     reset(activeSession ? 'active-session' : 'training');
   }} />;
 
+  if (screen === 'account-type') return <AccountTypeScreen onDone={() => reset('training')} />;
   if (screen === 'active-session') return <ActiveSessionScreen onCancel={() => reset('training')} onFinished={() => replace('summary')} />;
   if (screen === 'summary') return <SummaryScreen onDone={() => reset('training')} />;
   if (screen === 'create-routine') return <SafeAreaView style={styles.page}><CreateRoutineScreen onBack={goBack} onSaved={routine => {

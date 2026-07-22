@@ -2,16 +2,16 @@ import { EffortMode, makeId } from '@/src/domain/types';
 import { supabase } from '@/src/lib/supabase';
 
 export type MyRoleInfo = { role: string | null; coachId: string | null };
-export type CoachAthlete = { athleteId: string; email: string; bodyWeight: number | null; heightCm: number | null; goal: string | null; level: string | null };
+export type CoachAthlete = { athleteId: string; email: string; displayName: string | null; bodyWeight: number | null; heightCm: number | null; goal: string | null; level: string | null };
 export type CoachRoutineSummary = { id: string; name: string; day: number; effortMode: string; exerciseCount: number; setCount: number };
 export type CoachWorkoutSummary = { id: string; routineName: string; effortMode: string; date: string; durationSeconds: number; totalVolume: number; setsCompleted: number; exerciseNames: string[] };
 export type CoachComment = { id: string; text: string; createdAt: string; routineId: string | null; workoutId: string | null };
 
 export type BlockDraftSet = { weight: number; repsMin: number; repsMax: number; rpe: number | null; rir: number | null };
-export type BlockDraftExercise = { exerciseId: string; videoUrl: string | null; requiresAthleteVideo: boolean; sets: BlockDraftSet[] };
+export type BlockDraftExercise = { exerciseId: string; sets: BlockDraftSet[] };
 export type BlockDraftDay = { name: string; trainingDay: number; effortMode: EffortMode; exercises: BlockDraftExercise[] };
 
-type RemoteAthleteRow = { athlete_id: string; email: string; body_weight: number | string | null; height_cm: number | string | null; goal: string | null; level: string | null };
+type RemoteAthleteRow = { athlete_id: string; email: string; display_name: string | null; body_weight: number | string | null; height_cm: number | string | null; goal: string | null; level: string | null };
 type RemoteRoutineSetRow = { id: string };
 type RemoteRoutineExerciseRow = { id: string; routine_sets: RemoteRoutineSetRow[] | null };
 type RemoteRoutineRow = { id: string; name: string; training_day: number; effort_mode: string; routine_exercises: RemoteRoutineExerciseRow[] | null };
@@ -57,6 +57,7 @@ export async function getMyAthletes(): Promise<CoachAthlete[]> {
   return ((data ?? []) as RemoteAthleteRow[]).map(row => ({
     athleteId: row.athlete_id,
     email: row.email,
+    displayName: row.display_name && row.display_name.trim() ? row.display_name : null,
     bodyWeight: row.body_weight == null ? null : Number(row.body_weight),
     heightCm: row.height_cm == null ? null : Number(row.height_cm),
     goal: row.goal,
@@ -167,8 +168,6 @@ export async function createAthleteBlock(athleteId: string, days: BlockDraftDay[
       routine_id: plan.routineId,
       exercise_id: plan.exercise.exerciseId,
       position: plan.position,
-      video_url: plan.exercise.videoUrl,
-      requires_athlete_video: plan.exercise.requiresAthleteVideo,
     })));
     if (result.error) throw result.error;
   }

@@ -24,7 +24,7 @@ export type WorkoutHistory = {
   exercises: ActiveExercise[];
 };
 
-export type Profile = { bodyWeight: string; height: string; goal: string; level: string; defaultRestSeconds: number; updatedAt: string };
+export type Profile = { displayName: string; bodyWeight: string; height: string; goal: string; level: string; defaultRestSeconds: number; updatedAt: string };
 export type DeletionTombstone = { entityType: 'routine'; recordId: string; deletedAt: string };
 export type PersistedData = { routines: Routine[]; history: WorkoutHistory[]; profile: Profile; tombstones: DeletionTombstone[] };
 

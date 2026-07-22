@@ -113,6 +113,7 @@ function normalizeWorkout(value: unknown): WorkoutHistory {
 function normalizeProfile(value: unknown, migratedAt: string): Profile {
   const source = record(value);
   return {
+    displayName: text(source.displayName),
     bodyWeight: text(source.bodyWeight),
     height: text(source.height),
     goal: normalizeGoal(text(source.goal, 'Ganar fuerza máxima')),

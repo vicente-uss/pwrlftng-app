@@ -7,7 +7,7 @@ import { migratePrototypeData } from '@/src/storage/dataMigrations';
 type PullResult = { status: 'no-session' } | { status: 'pulled'; data: PersistedData };
 export type PushResult = 'no-session' | 'pull-required' | 'synced';
 
-type RemoteProfile = { body_weight: number | string | null; height_cm: number | null; goal: string; level: string; default_rest_seconds: number; updated_at: string };
+type RemoteProfile = { display_name: string | null; body_weight: number | string | null; height_cm: number | null; goal: string; level: string; default_rest_seconds: number; updated_at: string };
 type RemoteExercise = { id: string; name: string; muscle: string };
 type RemoteRoutine = { id: string; name: string; training_day: number; effort_mode: string; created_at: string; updated_at: string };
 type RemoteRoutineExercise = { id: string; routine_id: string; exercise_id: string; position: number };
@@ -44,7 +44,7 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
   if (!userId) return { status: 'no-session' };
 
   const [profileResult, exercisesResult, routinesResult, routineExercisesResult, routineSetsResult, workoutsResult, workoutExercisesResult, workoutSetsResult, tombstonesResult] = await Promise.all([
-    supabase.from('profiles').select('body_weight,height_cm,goal,level,default_rest_seconds,updated_at').eq('id', userId).maybeSingle(),
+    supabase.from('profiles').select('display_name,body_weight,height_cm,goal,level,default_rest_seconds,updated_at').eq('id', userId).maybeSingle(),
     supabase.from('exercises').select('id,name,muscle'),
     supabase.from('routines').select('id,name,training_day,effort_mode,created_at,updated_at').eq('user_id', userId).order('training_day'),
     supabase.from('routine_exercises').select('id,routine_id,exercise_id,position').eq('user_id', userId).order('position'),
@@ -121,6 +121,7 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
 
   const profileRow = profileResult.data as RemoteProfile | null;
   const remoteProfile: Profile = profileRow ? {
+    displayName: profileRow.display_name ?? '',
     bodyWeight: profileRow.body_weight == null ? '' : String(profileRow.body_weight),
     height: profileRow.height_cm == null ? '' : String(profileRow.height_cm),
     goal: profileRow.goal,
@@ -140,6 +141,7 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
   const remoteAccountUntouched = remoteRoutines.length === 0
     && remoteHistory.length === 0
     && remoteData.tombstones.length === 0
+    && (profileRow?.display_name == null || profileRow.display_name === '')
     && profileRow?.body_weight == null
     && profileRow?.height_cm == null
     && profileRow?.default_rest_seconds === 180;
@@ -161,6 +163,7 @@ export async function syncDataToCloud(data: PersistedData): Promise<PushResult> 
   const liveRoutines = withoutDeletedRoutines(data.routines, data.tombstones);
   const profileResult = await supabase.from('profiles').upsert({
     id: userId,
+    display_name: data.profile.displayName.trim() || null,
     body_weight: Number(data.profile.bodyWeight) || null,
     height_cm: Number(data.profile.height) || null,
     goal: data.profile.goal,

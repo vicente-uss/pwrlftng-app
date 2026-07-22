@@ -35,14 +35,17 @@ export function CoachAthletesScreen({ onBack, onAthlete }: { onBack(): void; onA
       {loading ? <Text style={styles.dim}>Cargando atletas…</Text> : null}
       {error ? <Text style={styles.warning}>{error}</Text> : null}
       {!loading && !error && athletes.length === 0 ? <Card><Text style={styles.dim}>Todavía no tienes atletas vinculados. Comparte tu código de invitación desde tu perfil.</Text></Card> : null}
-      {athletes.map(athlete => <Pressable accessibilityRole="button" accessibilityLabel={`Ver atleta ${athlete.email}`} key={athlete.athleteId} onPress={() => onAthlete(athlete.athleteId)} style={styles.athleteCard}>
-        <View style={styles.athleteIcon}><Ionicons name="person" color={colors.orange} size={18} /></View>
-        <View style={styles.grow}>
-          <Text style={styles.strong}>{athlete.email}</Text>
-          <Text style={styles.dim}>{athlete.bodyWeight != null ? `${athlete.bodyWeight}kg` : 'Sin peso registrado'} · {athlete.goal ?? 'Sin objetivo definido'}</Text>
-        </View>
-        <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
-      </Pressable>)}
+      {athletes.map(athlete => {
+        const displayLabel = athlete.displayName ?? athlete.email;
+        return <Pressable accessibilityRole="button" accessibilityLabel={`Ver atleta ${displayLabel}`} key={athlete.athleteId} onPress={() => onAthlete(athlete.athleteId)} style={styles.athleteCard}>
+          <View style={styles.athleteIcon}><Ionicons name="person" color={colors.orange} size={18} /></View>
+          <View style={styles.grow}>
+            <Text style={styles.strong}>{displayLabel}</Text>
+            <Text style={styles.dim}>{athlete.bodyWeight != null ? `${athlete.bodyWeight}kg` : 'Sin peso registrado'}</Text>
+          </View>
+          <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+        </Pressable>;
+      })}
     </ScrollView>
   </View>;
 }
@@ -91,7 +94,7 @@ export function CoachAthleteDetailScreen({ athleteId, onBack, onNewBlock }: { at
   };
 
   return <View style={styles.fill}>
-    <TopBar title={athlete?.email ?? 'Atleta'} eyebrow={athlete?.goal ?? undefined} onBack={onBack} />
+    <TopBar title={athlete?.displayName ?? athlete?.email ?? 'Atleta'} onBack={onBack} />
     <View style={styles.cta}><PrimaryButton title="Nuevo bloque" onPress={onNewBlock} /></View>
     <ScrollView contentContainerStyle={styles.content}>
       {loading ? <Text style={styles.dim}>Cargando…</Text> : null}

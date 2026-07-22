@@ -78,6 +78,7 @@ function isUnmodifiedSeedData(data: PersistedData) {
   return routineIds === [...SEED_ROUTINE_IDS].sort().join(',')
     && data.history.length === 0
     && data.tombstones.length === 0
+    && data.profile.displayName === ''
     && data.profile.bodyWeight === '85' && data.profile.height === '178'
     && data.profile.goal === GOAL_OPTIONS[0] && data.profile.level === DEFAULT_BLOCK
     && data.profile.defaultRestSeconds === 180;

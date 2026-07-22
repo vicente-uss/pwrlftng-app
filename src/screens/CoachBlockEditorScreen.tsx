@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PrimaryButton, TopBar } from '@/src/components/ui';
 import { EXERCISES } from '@/src/data/seed';
 import { EFFORT_MODES, usesRir, usesRpe } from '@/src/domain/training';
@@ -11,15 +11,13 @@ import { colors } from '@/src/theme';
 
 type DraftSet = { id: string; weight: string; repsMin: string; repsMax: string; rpe: string; rir: string };
 type DraftField = 'weight' | 'repsMin' | 'repsMax' | 'rpe' | 'rir';
-type DraftExercise = { id: string; exerciseId: string; videoUrl: string; requiresAthleteVideo: boolean; sets: DraftSet[] };
+type DraftExercise = { id: string; exerciseId: string; sets: DraftSet[] };
 type DraftDay = { id: string; name: string; effortMode: EffortMode; exercises: DraftExercise[] };
 
 function newDraftExercise(exerciseId: string): DraftExercise {
   return {
     id: makeId('block-ex'),
     exerciseId,
-    videoUrl: '',
-    requiresAthleteVideo: false,
     sets: [1, 2, 3].map(() => ({ id: makeId('block-set'), weight: '0', repsMin: '5', repsMax: '5', rpe: '8', rir: '2' })),
   };
 }
@@ -82,16 +80,6 @@ export function CoachBlockEditorScreen({ athleteId, onBack, onSaved }: { athlete
     })),
   })));
 
-  const updateVideoUrl = (dayId: string, exerciseDraftId: string, value: string) => setDays(current => current.map(day => day.id !== dayId ? day : ({
-    ...day,
-    exercises: day.exercises.map(exercise => exercise.id === exerciseDraftId ? { ...exercise, videoUrl: value } : exercise),
-  })));
-
-  const updateRequiresVideo = (dayId: string, exerciseDraftId: string, value: boolean) => setDays(current => current.map(day => day.id !== dayId ? day : ({
-    ...day,
-    exercises: day.exercises.map(exercise => exercise.id === exerciseDraftId ? { ...exercise, requiresAthleteVideo: value } : exercise),
-  })));
-
   const hasDaysWithExercises = days.some(day => day.exercises.length > 0);
   const hasInvalidRange = days.some(day => day.exercises.some(exercise => exercise.sets.some(set => {
     const minimum = Number(set.repsMin);
@@ -114,8 +102,6 @@ export function CoachBlockEditorScreen({ athleteId, onBack, onSaved }: { athlete
         effortMode: day.effortMode,
         exercises: day.exercises.map(exercise => ({
           exerciseId: exercise.exerciseId,
-          videoUrl: exercise.videoUrl.trim() || null,
-          requiresAthleteVideo: exercise.requiresAthleteVideo,
           sets: exercise.sets.map(set => ({
             weight: Math.max(0, Number(set.weight) || 0),
             repsMin: Math.max(0, Math.round(Number(set.repsMin) || 0)),
@@ -190,11 +176,6 @@ export function CoachBlockEditorScreen({ athleteId, onBack, onSaved }: { athlete
                   {usesRir(day.effortMode) && <DraftInput label={`RIR serie ${index + 1}`} value={set.rir} onChange={value => updateSet(day.id, draft.id, set.id, 'rir', value)} decimal />}
                 </View>
               </View>)}
-              <TextInput accessibilityLabel={`Video de referencia para ${exercise.name}`} value={draft.videoUrl} onChangeText={value => updateVideoUrl(day.id, draft.id, value)} placeholder="Video de referencia (URL, opcional)" placeholderTextColor={colors.subtle} autoCapitalize="none" style={styles.videoInput} />
-              <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>Requiere video del atleta</Text>
-                <Switch accessibilityLabel={`Requiere video del atleta en ${exercise.name}`} value={draft.requiresAthleteVideo} onValueChange={value => updateRequiresVideo(day.id, draft.id, value)} trackColor={{ false: colors.subtle, true: colors.orange }} thumbColor={colors.text} />
-              </View>
             </View>}
           </View>;
         })}
@@ -237,9 +218,6 @@ const styles = StyleSheet.create({
   draftSet: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 7 },
   setTitle: { color: colors.orange, fontSize: 9, fontWeight: '800', letterSpacing: 1.3 },
   draftFields: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  videoInput: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingVertical: 10, paddingHorizontal: 12, color: colors.text, fontSize: 13 },
-  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  switchLabel: { color: colors.muted, fontSize: 13, fontWeight: '600' },
   addDayButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed', borderRadius: 12, paddingVertical: 14, marginTop: 6 },
   addDayText: { color: colors.orange, fontWeight: '700', fontSize: 13 },
 });

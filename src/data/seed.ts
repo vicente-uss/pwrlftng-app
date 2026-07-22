@@ -102,6 +102,7 @@ export function freshDefaultData(): PersistedData {
     routines: cloneRoutines(),
     history: [],
     profile: {
+      displayName: '',
       bodyWeight: '85',
       height: '178',
       goal: 'Ganar fuerza máxima',

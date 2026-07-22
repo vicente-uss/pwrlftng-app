@@ -13,7 +13,7 @@ function data(overrides: Partial<PersistedData> = {}): PersistedData {
   return {
     routines: [],
     history: [],
-    profile: { bodyWeight: '80', height: '175', goal: 'Fuerza', level: 'Intermedio', defaultRestSeconds: 180, updatedAt: older },
+    profile: { displayName: '', bodyWeight: '80', height: '175', goal: 'Fuerza', level: 'Intermedio', defaultRestSeconds: 180, updatedAt: older },
     tombstones: [],
     ...overrides,
   };

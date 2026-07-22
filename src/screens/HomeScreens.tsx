@@ -13,11 +13,11 @@ import { useAppStore } from '@/src/store/AppStore';
 import { colors, condensed, shortDays } from '@/src/theme';
 
 export function LoginScreen({ onLogin, onSignedUp, onDemo }: { onLogin(): Promise<void>; onSignedUp(): Promise<void>; onDemo(): void }) {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busyMode, setBusyMode] = useState<'login' | 'signup' | null>(null);
   const [error, setError] = useState('');
+  const busy = busyMode !== null;
 
   const validate = () => {
     if (!isSupabaseConfigured) {
@@ -31,9 +31,9 @@ export function LoginScreen({ onLogin, onSignedUp, onDemo }: { onLogin(): Promis
     return true;
   };
 
-  const submit = async () => {
-    if (!validate()) return;
-    setBusy(true);
+  const submit = async (mode: 'login' | 'signup') => {
+    if (busy || !validate()) return;
+    setBusyMode(mode);
     setError('');
     try {
       const session = mode === 'login'
@@ -45,13 +45,8 @@ export function LoginScreen({ onLogin, onSignedUp, onDemo }: { onLogin(): Promis
       const message = cause instanceof Error ? cause.message : 'No pudimos conectar con tu cuenta.';
       setError(message === 'Invalid login credentials' ? 'Email o contraseña incorrectos.' : message);
     } finally {
-      setBusy(false);
+      setBusyMode(null);
     }
-  };
-
-  const selectMode = (next: 'login' | 'signup') => {
-    setMode(next);
-    setError('');
   };
 
   return <SafeAreaView style={styles.login}>
@@ -59,24 +54,18 @@ export function LoginScreen({ onLogin, onSignedUp, onDemo }: { onLogin(): Promis
       <View style={styles.loginInner}>
         <Brand />
         <View style={styles.form}>
-          <View style={styles.modeToggle}>
-            <Pressable accessibilityRole="button" accessibilityLabel="Iniciar sesión" accessibilityState={{ selected: mode === 'login' }} disabled={busy} onPress={() => selectMode('login')} style={[styles.modeChip, mode === 'login' && styles.modeChipActive]}>
-              <Text style={[styles.modeChipText, mode === 'login' && styles.modeChipTextActive]}>Iniciar sesión</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel="Crear cuenta" accessibilityState={{ selected: mode === 'signup' }} disabled={busy} onPress={() => selectMode('signup')} style={[styles.modeChip, mode === 'signup' && styles.modeChipActive]}>
-              <Text style={[styles.modeChipText, mode === 'signup' && styles.modeChipTextActive]}>Crear cuenta</Text>
-            </Pressable>
-          </View>
           <TextInput accessibilityLabel="Email" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor="#3a3a3a" style={styles.input} />
           <TextInput accessibilityLabel="Contraseña" value={password} onChangeText={setPassword} placeholder="Contraseña" placeholderTextColor="#3a3a3a" secureTextEntry style={styles.input} />
           {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
-          <PrimaryButton
-            title={busy ? (mode === 'login' ? 'Recuperando tus datos…' : 'Creando tu cuenta…') : (mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta')}
-            light
-            disabled={busy}
-            onPress={submit}
-          />
           <Pressable accessibilityRole="button" accessibilityLabel="Continuar con Google" disabled style={styles.google}><Text style={styles.muted}>G  Google · próximamente</Text></Pressable>
+          <PrimaryButton
+            title={busyMode === 'login' ? 'Recuperando tus datos…' : 'Iniciar sesión'}
+            disabled={busy}
+            onPress={() => submit('login')}
+          />
+          <Pressable accessibilityRole="button" accessibilityLabel="Crear cuenta" disabled={busy} onPress={() => submit('signup')} style={({ pressed }) => [styles.signupButton, busy && styles.signupDisabled, pressed && styles.signupPressed]}>
+            <Text style={styles.signupText}>{busyMode === 'signup' ? 'Creando tu cuenta…' : 'Crear cuenta'}</Text>
+          </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Probar con cuenta demo" disabled={busy} onPress={onDemo}><Text style={styles.demo}>Probar con cuenta demo →</Text></Pressable>
         </View>
       </View>
@@ -223,11 +212,10 @@ const styles = StyleSheet.create({
   form: { gap: 12 },
   input: { backgroundColor: '#141414', borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, color: colors.text, fontSize: 15 },
   error: { color: colors.danger, fontSize: 12, lineHeight: 17 },
-  modeToggle: { flexDirection: 'row', gap: 8, marginBottom: 4 },
-  modeChip: { flex: 1, alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingVertical: 11 },
-  modeChipActive: { backgroundColor: colors.orange, borderColor: colors.orange },
-  modeChipText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
-  modeChipTextActive: { color: colors.text },
+  signupButton: { borderWidth: 1, borderColor: colors.orange, borderRadius: 12, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  signupText: { color: colors.orange, fontWeight: '800', fontSize: 14 },
+  signupDisabled: { opacity: 0.35 },
+  signupPressed: { opacity: 0.75 },
   google: { borderWidth: 1, borderColor: '#2a2a2a', borderRadius: 12, padding: 15, alignItems: 'center', opacity: 0.55 },
   demo: { color: colors.orange, textAlign: 'center', padding: 12 },
   muted: { color: colors.muted },

@@ -12,7 +12,7 @@ vi.mock('@/src/lib/supabase', () => ({
 const localData: PersistedData = {
   routines: [],
   history: [],
-  profile: { bodyWeight: '', height: '', goal: 'Fuerza', level: 'Inicial', defaultRestSeconds: 180, updatedAt: '2026-01-01T00:00:00.000Z' },
+  profile: { displayName: '', bodyWeight: '', height: '', goal: 'Fuerza', level: 'Inicial', defaultRestSeconds: 180, updatedAt: '2026-01-01T00:00:00.000Z' },
   tombstones: [],
 };
 

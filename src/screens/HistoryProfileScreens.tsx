@@ -3,7 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, ConfirmDialog, PrimaryButton, TopBar, formatDate } from '@/src/components/ui';
-import { DEFAULT_BLOCK, GOAL_OPTIONS, REST_PRESETS, formatRestDuration, isPresetRest, parseRestDuration } from '@/src/domain/profileOptions';
+import { DEFAULT_BLOCK, REST_PRESETS, formatRestDuration, isPresetRest, parseRestDuration } from '@/src/domain/profileOptions';
 import { effortModeLabel, usesRir, usesRpe } from '@/src/domain/training';
 import { Profile, WorkoutHistory } from '@/src/domain/types';
 import { useMyRole } from '@/src/hooks/useMyRole';
@@ -191,13 +191,10 @@ export function ProfileScreen({ onSignOut, onExercises, onAthletes, onAccountTyp
   return <View style={styles.fill}>
     <TopBar title="Perfil" action={<Ionicons name="settings-outline" color={colors.dim} size={21} />} />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-      <Card><View style={styles.profileHead}><View style={styles.avatar}><Ionicons name="person" color={colors.muted} size={22} /></View><View style={styles.grow}><Text style={styles.profileName}>Atleta PWRLFTNG</Text><Text style={styles.dim}>{DEFAULT_BLOCK} · {local.goal}</Text></View></View><Text style={[styles.sync, store.syncState === 'error' && styles.syncError]}>{syncMessage}</Text></Card>
+      <Card><View style={styles.profileHead}><View style={styles.avatar}><Ionicons name="person" color={colors.muted} size={22} /></View><View style={styles.grow}><TextInput accessibilityLabel="Nombre" value={local.displayName} onChangeText={value => change('displayName', value)} placeholder="Tu nombre" placeholderTextColor={colors.subtle} style={styles.nameInput} /><Text style={styles.dim}>{DEFAULT_BLOCK}</Text></View></View><Text style={[styles.sync, store.syncState === 'error' && styles.syncError]}>{syncMessage}</Text></Card>
 
       <Text style={styles.section}>DATOS DEL ATLETA</Text>
       <View style={styles.metricsRow}><Card style={styles.metricCard}><TextInput accessibilityLabel="Peso corporal en kilogramos" value={local.bodyWeight} onChangeText={value => change('bodyWeight', value)} keyboardType="decimal-pad" style={styles.bigInput} /><Text style={styles.metricLabel}>KG · PESO</Text></Card><Card style={styles.metricCard}><TextInput accessibilityLabel="Altura en centímetros" value={local.height} onChangeText={value => change('height', value)} keyboardType="number-pad" style={styles.bigInput} /><Text style={styles.metricLabel}>CM · ALTURA</Text></Card></View>
-
-      <Text style={styles.section}>OBJETIVO</Text>
-      <View style={styles.optionList}>{GOAL_OPTIONS.map(goal => <Pressable accessibilityRole="radio" accessibilityLabel={goal} accessibilityState={{ selected: local.goal === goal }} key={goal} onPress={() => change('goal', goal)} style={[styles.option, local.goal === goal && styles.optionActive]}><Ionicons name={local.goal === goal ? 'radio-button-on' : 'radio-button-off'} color={local.goal === goal ? colors.orange : colors.dim} size={18} /><Text style={[styles.optionText, local.goal === goal && styles.optionTextActive]}>{goal}</Text></Pressable>)}</View>
 
       <Text style={styles.section}>BLOQUE</Text>
       <View accessibilityState={{ disabled: true }} style={styles.disabledField}><View><Text style={styles.strong}>{DEFAULT_BLOCK}</Text><Text style={styles.dim}>La edición de bloques estará disponible más adelante.</Text></View><Ionicons name="lock-closed-outline" color={colors.subtle} size={17} /></View>
@@ -298,16 +295,13 @@ const styles = StyleSheet.create({
   warmup: { color: colors.warning },
   profileHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 48, height: 48, borderRadius: 14, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' },
-  profileName: { color: colors.text, fontSize: 18, fontWeight: '800', fontFamily: condensed },
   sync: { color: colors.success, fontSize: 10 },
   syncError: { color: colors.warning },
   metricsRow: { flexDirection: 'row', gap: 10 },
   metricCard: { flex: 1 },
   bigInput: { color: colors.text, fontSize: 30, fontWeight: '900', fontFamily: condensed, padding: 0 },
-  optionList: { gap: 8 },
-  option: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  nameInput: { color: colors.text, fontSize: 18, fontWeight: '800', fontFamily: condensed, padding: 0 },
   optionActive: { borderColor: colors.orange, backgroundColor: '#21130d' },
-  optionText: { color: colors.muted, fontWeight: '600' },
   optionTextActive: { color: colors.text },
   disabledField: { opacity: 0.58, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   restGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

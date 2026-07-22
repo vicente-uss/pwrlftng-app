@@ -47,7 +47,7 @@ function validOptionalEffort(value: string, minimum: number) {
   return Number.isFinite(parsed) && parsed >= minimum && parsed <= 10;
 }
 
-function DraftInput({ label, value, onChange, decimal = false }: { label: string; value: string; onChange(value: string): void; decimal?: boolean }) {
+export function DraftInput({ label, value, onChange, decimal = false }: { label: string; value: string; onChange(value: string): void; decimal?: boolean }) {
   return <View style={styles.draftField}>
     <Text style={styles.draftLabel}>{label}</Text>
     <TextInput
@@ -61,7 +61,7 @@ function DraftInput({ label, value, onChange, decimal = false }: { label: string
   </View>;
 }
 
-function RepsControl({ index, repsMin, repsMax, onChangeMin, onChangeMax, onToggleMode }: {
+export function RepsControl({ index, repsMin, repsMax, onChangeMin, onChangeMax, onToggleMode }: {
   index: number;
   repsMin: string;
   repsMax: string;

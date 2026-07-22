@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, ConfirmDialog, PrimaryButton, TopBar, formatDate } from '@/src/components/ui';
 import { DEFAULT_BLOCK, GOAL_OPTIONS, REST_PRESETS, formatRestDuration, isPresetRest, parseRestDuration } from '@/src/domain/profileOptions';
 import { effortModeLabel, usesRir, usesRpe } from '@/src/domain/training';
 import { Profile, WorkoutHistory } from '@/src/domain/types';
+import { useMyRole } from '@/src/hooks/useMyRole';
+import { generateInviteCode, redeemCoachCode } from '@/src/services/coachService';
 import { useAppStore } from '@/src/store/AppStore';
 import { colors, condensed } from '@/src/theme';
 
@@ -80,7 +83,7 @@ export function SessionDetailScreen({ session, onBack, onExercise }: { session: 
   </View>;
 }
 
-export function ProfileScreen({ onSignOut, onExercises }: { onSignOut(): Promise<void>; onExercises(): void }) {
+export function ProfileScreen({ onSignOut, onExercises, onAthletes }: { onSignOut(): Promise<void>; onExercises(): void; onAthletes(): void }) {
   const store = useAppStore();
   const [local, setLocal] = useState<Profile>({ ...store.profile, level: DEFAULT_BLOCK });
   const [customRest, setCustomRest] = useState(isPresetRest(store.profile.defaultRestSeconds) ? '' : formatRestDuration(store.profile.defaultRestSeconds));
@@ -91,6 +94,51 @@ export function ProfileScreen({ onSignOut, onExercises }: { onSignOut(): Promise
   const [logoutError, setLogoutError] = useState('');
   const parsedCustomRest = parseRestDuration(customRest);
   const restInvalid = customMode && parsedCustomRest === null;
+
+  const { role, error: roleError, refresh: refreshRole } = useMyRole();
+  const [inviteInput, setInviteInput] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const [generateBusy, setGenerateBusy] = useState(false);
+  const [generateError, setGenerateError] = useState('');
+  const [generatedCode, setGeneratedCode] = useState('');
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const linkWithCoach = async () => {
+    const code = inviteInput.trim();
+    if (!code) return;
+    setLinkBusy(true);
+    setLinkError('');
+    try {
+      await redeemCoachCode(code);
+      setInviteInput('');
+      await refreshRole();
+    } catch (cause) {
+      setLinkError(cause instanceof Error ? cause.message : 'No pudimos vincular el código. Inténtalo otra vez.');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  const generateCode = async () => {
+    setGenerateBusy(true);
+    setGenerateError('');
+    setCodeCopied(false);
+    try {
+      setGeneratedCode(await generateInviteCode());
+      await refreshRole();
+    } catch (cause) {
+      setGenerateError(cause instanceof Error ? cause.message : 'No pudimos generar el código. Inténtalo otra vez.');
+    } finally {
+      setGenerateBusy(false);
+    }
+  };
+
+  const copyGeneratedCode = async () => {
+    if (!generatedCode) return;
+    await Clipboard.setStringAsync(generatedCode);
+    setCodeCopied(true);
+  };
 
   const change = (key: keyof Profile, value: string | number) => {
     setSaved(false);
@@ -167,6 +215,37 @@ export function ProfileScreen({ onSignOut, onExercises }: { onSignOut(): Promise
         <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
       </Pressable>
 
+      <Text style={styles.section}>COACH</Text>
+      {roleError ? <Text style={styles.warning}>{roleError}</Text> : null}
+      {role?.coachId ? <Card><Text style={styles.strong}>Vinculado con tu coach</Text></Card> : <View style={styles.coachLinkRow}>
+        <TextInput accessibilityLabel="Código de invitación del coach" value={inviteInput} onChangeText={setInviteInput} placeholder="Código de invitación" placeholderTextColor={colors.subtle} autoCapitalize="characters" style={styles.coachInput} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Vincular con mi coach" disabled={linkBusy || !inviteInput.trim()} onPress={linkWithCoach} style={[styles.coachLinkButton, (linkBusy || !inviteInput.trim()) && styles.coachDisabled]}>
+          <Text style={styles.coachLinkButtonText}>{linkBusy ? 'Vinculando…' : 'Vincular'}</Text>
+        </Pressable>
+      </View>}
+      {linkError ? <Text style={styles.warning}>{linkError}</Text> : null}
+
+      <Pressable accessibilityRole="button" accessibilityLabel="Generar código para un atleta" disabled={generateBusy} onPress={generateCode} style={[styles.exercisesButton, generateBusy && styles.coachDisabled]}>
+        <View style={styles.exercisesIcon}><Ionicons name="qr-code-outline" color={colors.orange} size={18} /></View>
+        <View style={styles.grow}><Text style={styles.strong}>Generar código para un atleta</Text><Text style={styles.dim}>{generateBusy ? 'Generando…' : 'Comparte un código para vincular a un atleta contigo'}</Text></View>
+        <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+      </Pressable>
+      {generateError ? <Text style={styles.warning}>{generateError}</Text> : null}
+      {generatedCode ? <Card style={styles.codeCard}>
+        <Text style={styles.dim}>CÓDIGO GENERADO</Text>
+        <Text style={styles.codeText}>{generatedCode}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Copiar código" onPress={copyGeneratedCode} style={styles.copyButton}>
+          <Ionicons name={codeCopied ? 'checkmark' : 'copy-outline'} color={colors.text} size={16} />
+          <Text style={styles.copyButtonText}>{codeCopied ? 'Copiado' : 'Copiar código'}</Text>
+        </Pressable>
+      </Card> : null}
+
+      {role?.role === 'coach' ? <Pressable accessibilityRole="button" accessibilityLabel="Mis atletas" onPress={onAthletes} style={styles.exercisesButton}>
+        <View style={styles.exercisesIcon}><Ionicons name="people-outline" color={colors.orange} size={18} /></View>
+        <View style={styles.grow}><Text style={styles.strong}>Mis atletas</Text><Text style={styles.dim}>Rutinas, entrenamientos y comentarios de tus atletas</Text></View>
+        <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+      </Pressable> : null}
+
       <Text style={styles.section}>SESIÓN</Text>
       {logoutError ? <Text accessibilityLiveRegion="polite" style={styles.warning}>{logoutError}</Text> : null}
       <Pressable accessibilityRole="button" accessibilityLabel="Cerrar sesión" disabled={logoutBusy} onPress={() => setLogoutVisible(true)} style={styles.logoutButton}><Ionicons name="log-out-outline" color={colors.danger} size={19} /><Text style={styles.logoutText}>{logoutBusy ? 'Cerrando sesión…' : 'Cerrar sesión'}</Text></Pressable>
@@ -231,4 +310,13 @@ const styles = StyleSheet.create({
   logoutText: { color: colors.danger, fontWeight: '700' },
   exercisesButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 13, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
   exercisesIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' },
+  coachDisabled: { opacity: 0.5 },
+  coachLinkRow: { flexDirection: 'row', gap: 8 },
+  coachInput: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 11, paddingHorizontal: 13, paddingVertical: 12, color: colors.text, fontSize: 14 },
+  coachLinkButton: { backgroundColor: colors.orange, borderRadius: 11, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  coachLinkButtonText: { color: colors.text, fontWeight: '700', fontSize: 13 },
+  codeCard: { alignItems: 'center', gap: 8 },
+  codeText: { color: colors.text, fontSize: 28, fontWeight: '900', fontFamily: 'monospace', letterSpacing: 3 },
+  copyButton: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: colors.elevated, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14 },
+  copyButtonText: { color: colors.text, fontWeight: '700', fontSize: 12 },
 });

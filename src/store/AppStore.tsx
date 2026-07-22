@@ -1,7 +1,7 @@
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { EXERCISES, SEED_ROUTINE_IDS, freshDefaultData } from '@/src/data/seed';
 import { DEFAULT_BLOCK, GOAL_OPTIONS, MAX_REST_SECONDS } from '@/src/domain/profileOptions';
-import { bestByRepCount, heaviestWeight, previousSetPerformance } from '@/src/domain/records';
+import { bestByRepCount, bestRpeAtOrAbove, heaviestWeight, previousSetPerformance } from '@/src/domain/records';
 import { ActiveExercise, ActiveSession, EffortMode, PersistedData, Profile, Routine, RoutineExercise, SetType, WorkoutHistory, makeId } from '@/src/domain/types';
 import { normalizeRepRange } from '@/src/domain/training';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
@@ -18,7 +18,7 @@ export type CreateRoutineInput = {
 
 type SetField = 'weight' | 'reps' | 'rpe' | 'rir';
 export type SyncState = 'local' | 'pulling' | 'syncing' | 'synced' | 'error';
-export type PrEvent = { exerciseName: string; kind: 'weight' | 'reps' };
+export type PrEvent = { exerciseName: string; kind: 'weight' | 'reps' | 'rpe' };
 type Store = PersistedData & {
   hydrated: boolean;
   activeSession: ActiveSession | null;
@@ -323,12 +323,18 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       if (hasPriorSession) {
         const weight = Number(set.weight) || 0;
         const reps = Number(set.reps) || 0;
+        const rpe = set.rpe.trim() ? Number(set.rpe) : null;
         const heaviest = heaviestWeight(data.history, exercise.exerciseId);
         const repRecord = bestByRepCount(data.history, exercise.exerciseId).find(item => item.reps === reps);
         if (heaviest && weight > heaviest.weight) {
           setLastPrEvent({ exerciseName: exercise.name, kind: 'weight' });
         } else if (reps > 0 && (!repRecord || weight > repRecord.weight)) {
           setLastPrEvent({ exerciseName: exercise.name, kind: 'reps' });
+        } else if (rpe != null) {
+          const bestRpe = bestRpeAtOrAbove(data.history, exercise.exerciseId, weight, reps);
+          if (bestRpe != null && rpe < bestRpe) {
+            setLastPrEvent({ exerciseName: exercise.name, kind: 'rpe' });
+          }
         }
       }
     }

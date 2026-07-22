@@ -83,7 +83,7 @@ export function SessionDetailScreen({ session, onBack, onExercise }: { session: 
   </View>;
 }
 
-export function ProfileScreen({ onSignOut, onExercises, onAthletes }: { onSignOut(): Promise<void>; onExercises(): void; onAthletes(): void }) {
+export function ProfileScreen({ onSignOut, onExercises, onAthletes, onAccountType }: { onSignOut(): Promise<void>; onExercises(): void; onAthletes(): void; onAccountType(): void }) {
   const store = useAppStore();
   const [local, setLocal] = useState<Profile>({ ...store.profile, level: DEFAULT_BLOCK });
   const [customRest, setCustomRest] = useState(isPresetRest(store.profile.defaultRestSeconds) ? '' : formatRestDuration(store.profile.defaultRestSeconds));
@@ -217,6 +217,17 @@ export function ProfileScreen({ onSignOut, onExercises, onAthletes }: { onSignOu
 
       <Text style={styles.section}>COACH</Text>
       {roleError ? <Text style={styles.warning}>{roleError}</Text> : null}
+
+      {role?.role === 'atleta' && !role.coachId ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Convertirme en coach o vincular con mi coach" onPress={onAccountType} style={styles.exercisesButton}>
+          <View style={styles.exercisesIcon}><Ionicons name="swap-horizontal-outline" color={colors.orange} size={18} /></View>
+          <View style={styles.grow}><Text style={styles.strong}>Convertirme en coach o vincular con mi coach</Text><Text style={styles.dim}>Elige cómo quieres usar PWRLFTNG</Text></View>
+          <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+        </Pressable>
+      ) : role?.role === 'coach' ? (
+        <Card><Text style={styles.strong}>Eres coach</Text><Text style={styles.dim}>Genera códigos y revisa a tus atletas más abajo.</Text></Card>
+      ) : null}
+
       {role?.coachId ? <Card><Text style={styles.strong}>Vinculado con tu coach</Text></Card> : <View style={styles.coachLinkRow}>
         <TextInput accessibilityLabel="Código de invitación del coach" value={inviteInput} onChangeText={setInviteInput} placeholder="Código de invitación" placeholderTextColor={colors.subtle} autoCapitalize="characters" style={styles.coachInput} />
         <Pressable accessibilityRole="button" accessibilityLabel="Vincular con mi coach" disabled={linkBusy || !inviteInput.trim()} onPress={linkWithCoach} style={[styles.coachLinkButton, (linkBusy || !inviteInput.trim()) && styles.coachDisabled]}>

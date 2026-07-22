@@ -165,7 +165,7 @@ export function PwrlftngApp() {
   return <AppShell tab={tab} onTab={goTab}><View style={styles.body}>
     {screen === 'training' ? <TrainingScreen onCreate={() => navigate('create-routine')} onRoutine={selectRoutine} onHistory={() => goTab('history')} onStart={start} /> : null}
     {screen === 'history' ? <HistoryScreen onSession={selectSession} onExercise={selectExerciseById} /> : null}
-    {screen === 'profile' ? <ProfileScreen onSignOut={handleSignOut} onExercises={() => navigate('exercise-library')} onAthletes={() => navigate('coach-athletes')} /> : null}
+    {screen === 'profile' ? <ProfileScreen onSignOut={handleSignOut} onExercises={() => navigate('exercise-library')} onAthletes={() => navigate('coach-athletes')} onAccountType={() => reset('account-type')} /> : null}
   </View></AppShell>;
 }
 

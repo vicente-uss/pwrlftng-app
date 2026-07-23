@@ -10,6 +10,8 @@ export type CoachComment = { id: string; text: string; createdAt: string; routin
 export type BlockDraftSet = { weight: number; repsMin: number; repsMax: number; rpe: number | null; rir: number | null };
 export type BlockDraftExercise = { exerciseId: string; sets: BlockDraftSet[] };
 export type BlockDraftDay = { name: string; trainingDay: number; effortMode: EffortMode; exercises: BlockDraftExercise[] };
+export type BlockDraftWeek = { name: string; weekNumber: number; isWarmup: boolean; days: BlockDraftDay[] };
+export type BlockDraftInfo = { name: string; goalText: string | null; startDate: string | null; totalWeeks: number };
 
 type RemoteAthleteRow = { athlete_id: string; email: string; display_name: string | null; body_weight: number | string | null; height_cm: number | string | null; goal: string | null; level: string | null };
 type RemoteRoutineSetRow = { id: string };
@@ -17,7 +19,7 @@ type RemoteRoutineExerciseRow = { id: string; routine_sets: RemoteRoutineSetRow[
 type RemoteRoutineRow = { id: string; name: string; training_day: number; effort_mode: string; routine_exercises: RemoteRoutineExerciseRow[] | null };
 type RemoteWorkoutExerciseRow = { exercise_name: string };
 type RemoteWorkoutRow = { id: string; routine_name: string; effort_mode: string; completed_at: string; duration_seconds: number; total_volume: number | string; sets_completed: number; workout_exercises: RemoteWorkoutExerciseRow[] | null };
-type RemoteCommentRow = { id: string; text: string; created_at: string; routine_id: string | null; workout_id: string | null };
+type RemoteCommentRow = { id: string; comment: string; created_at: string; routine_id: string | null; workout_id: string | null };
 
 async function currentUserId() {
   if (!supabase) throw new Error('Supabase aún no está configurado.');
@@ -111,13 +113,13 @@ export async function getComments(athleteId: string): Promise<CoachComment[]> {
   if (!supabase) throw new Error('Supabase aún no está configurado.');
   const { data, error } = await supabase
     .from('coach_comments')
-    .select('id,text,created_at,routine_id,workout_id')
+    .select('id,comment,created_at,routine_id,workout_id')
     .eq('athlete_id', athleteId)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return ((data ?? []) as RemoteCommentRow[]).map(row => ({
     id: row.id,
-    text: row.text,
+    text: row.comment,
     createdAt: row.created_at,
     routineId: row.routine_id,
     workoutId: row.workout_id,
@@ -130,33 +132,62 @@ export async function addComment(athleteId: string, text: string, routineId?: st
   const { error } = await supabase.from('coach_comments').insert({
     athlete_id: athleteId,
     coach_id: coachId,
-    text,
+    comment: text,
     routine_id: routineId ?? null,
     workout_id: workoutId ?? null,
   });
   if (error) throw error;
 }
 
-export async function createAthleteBlock(athleteId: string, days: BlockDraftDay[]) {
+export async function createAthleteBlock(athleteId: string, info: BlockDraftInfo, weeks: BlockDraftWeek[]) {
   if (!supabase) throw new Error('Supabase aún no está configurado.');
-  if (!days.length) return;
+  const populatedWeeks = weeks.filter(week => week.days.length > 0);
+  if (!populatedWeeks.length) return;
   const timestamp = new Date().toISOString();
+  const coachId = await currentUserId();
 
-  const routineRows = days.map(day => ({
+  const blockId = makeId('block');
+  const blockResult = await supabase.from('coach_blocks').insert({
+    id: blockId,
+    coach_id: coachId,
+    athlete_id: athleteId,
+    name: info.name,
+    goal_text: info.goalText,
+    start_date: info.startDate,
+    total_weeks: info.totalWeeks,
+  });
+  if (blockResult.error) throw blockResult.error;
+
+  const weekPlans = populatedWeeks.map(week => ({ id: makeId('block-week'), week }));
+  const weeksResult = await supabase.from('coach_block_weeks').insert(weekPlans.map(plan => ({
+    id: plan.id,
+    block_id: blockId,
+    week_number: plan.week.weekNumber,
+    name: plan.week.name,
+    is_warmup: plan.week.isWarmup,
+  })));
+  if (weeksResult.error) throw weeksResult.error;
+
+  const routinePlans = weekPlans.flatMap(weekPlan => weekPlan.week.days.map(day => ({
     id: makeId('routine'),
+    weekId: weekPlan.id,
+    day,
+  })));
+  const routinesResult = await supabase.from('routines').insert(routinePlans.map(plan => ({
+    id: plan.id,
     user_id: athleteId,
-    name: day.name,
-    training_day: day.trainingDay,
-    effort_mode: day.effortMode,
+    block_week_id: plan.weekId,
+    name: plan.day.name,
+    training_day: plan.day.trainingDay,
+    effort_mode: plan.day.effortMode,
     created_at: timestamp,
     updated_at: timestamp,
-  }));
-  const routinesResult = await supabase.from('routines').insert(routineRows);
+  })));
   if (routinesResult.error) throw routinesResult.error;
 
-  const routineExercisePlans = days.flatMap((day, dayIndex) => day.exercises.map((exercise, position) => ({
+  const routineExercisePlans = routinePlans.flatMap(plan => plan.day.exercises.map((exercise, position) => ({
     id: makeId('re'),
-    routineId: routineRows[dayIndex].id,
+    routineId: plan.id,
     exercise,
     position,
   })));

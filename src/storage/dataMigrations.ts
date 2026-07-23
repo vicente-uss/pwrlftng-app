@@ -62,6 +62,7 @@ function normalizeRoutine(value: unknown): Routine {
     }) : [],
     createdAt: text(source.createdAt, new Date().toISOString()),
     updatedAt: text(source.updatedAt, text(source.createdAt, new Date().toISOString())),
+    blockWeekId: typeof source.blockWeekId === 'string' ? source.blockWeekId : null,
   };
 }
 

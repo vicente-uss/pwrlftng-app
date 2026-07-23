@@ -6,7 +6,7 @@ export type EffortMode = 'rpe' | 'rir' | 'both' | 'none';
 export type Exercise = { id: string; name: string; muscle: string };
 export type RoutineSet = { id: string; type: SetType; weight: number; repsMin: number; repsMax: number; rpe?: number; rir?: number };
 export type RoutineExercise = { id: string; exerciseId: string; name: string; muscle: string; sets: RoutineSet[] };
-export type Routine = { id: string; name: string; day: number; effortMode: EffortMode; exercises: RoutineExercise[]; createdAt: string; updatedAt: string };
+export type Routine = { id: string; name: string; day: number; effortMode: EffortMode; exercises: RoutineExercise[]; createdAt: string; updatedAt: string; blockWeekId?: string | null };
 
 export type ActiveSet = { id: string; type: SetType; weight: string; reps: string; targetRepsMin: number; targetRepsMax: number; rpe: string; rir: string; completed: boolean; completedAt?: string };
 export type ActiveExercise = { id: string; exerciseId: string; name: string; muscle: string; notes: string; sets: ActiveSet[] };

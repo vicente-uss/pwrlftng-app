@@ -3,17 +3,17 @@ import { EXERCISES, SEED_ROUTINE_IDS, freshDefaultData } from '@/src/data/seed';
 import { DEFAULT_BLOCK, GOAL_OPTIONS, MAX_REST_SECONDS } from '@/src/domain/profileOptions';
 import { bestByRepCount, bestRpeAtOrAbove, heaviestWeight, previousSetPerformance } from '@/src/domain/records';
 import { ActiveExercise, ActiveSession, EffortMode, PersistedData, Profile, Routine, RoutineExercise, SetType, WorkoutHistory, makeId } from '@/src/domain/types';
-import { normalizeRepRange } from '@/src/domain/training';
+import { linkedEffortUpdate, normalizeRepRange } from '@/src/domain/training';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
 import { pullDataFromCloud, resetCloudSyncGuard, syncDataToCloud } from '@/src/services/cloudSync';
 import { loadActiveSession, loadData, saveActiveSession, saveData } from '@/src/storage/appStorage';
 
-export type CreateRoutineSetInput = { type: SetType; weight: number; repsMin: number; repsMax: number; rpe?: number; rir?: number };
+export type CreateRoutineSetInput = { type: SetType; weight: number; repsMin: number; repsMax: number; rpe?: number; rir?: number; effortLinked?: boolean };
 export type CreateRoutineInput = {
   name: string;
   day: number;
   effortMode: EffortMode;
-  exercises: { exerciseId: string; sets: CreateRoutineSetInput[] }[];
+  exercises: { exerciseId: string; name?: string; muscle?: string; sets: CreateRoutineSetInput[] }[];
 };
 
 type SetField = 'weight' | 'reps' | 'rpe' | 'rir';
@@ -32,8 +32,8 @@ type Store = PersistedData & {
   updateRoutine(id: string, input: CreateRoutineInput): Routine;
   duplicateRoutine(id: string): void;
   deleteRoutine(id: string): void;
-  startWorkout(routineId?: string): void;
-  startWorkoutFromRoutine(routine: Routine, context?: { blockId?: string | null; blockWeekId?: string | null }): void;
+  startWorkout(routineId?: string): ActiveSession;
+  startWorkoutFromRoutine(routine: Routine, context?: { blockId?: string | null; blockWeekId?: string | null }): ActiveSession;
   addExerciseToActive(exerciseId: string): void;
   updateActiveSet(exerciseId: string, setId: string, field: SetField, value: string): void;
   updateActiveExerciseNotes(exerciseId: string, notes: string): void;
@@ -50,7 +50,7 @@ type Store = PersistedData & {
 
 const Context = createContext<Store | null>(null);
 
-function toActiveExercise(exercise: RoutineExercise, history: WorkoutHistory[]): ActiveExercise {
+function toActiveExercise(exercise: RoutineExercise): ActiveExercise {
   return {
     id: makeId('ae'),
     sourceRoutineExerciseId: exercise.id,
@@ -59,19 +59,22 @@ function toActiveExercise(exercise: RoutineExercise, history: WorkoutHistory[]):
     name: exercise.name,
     muscle: exercise.muscle,
     notes: '',
-    sets: exercise.sets.map((set, index) => {
-      const previous = previousSetPerformance(history, exercise.exerciseId, index);
+    sets: exercise.sets.map(set => {
       return {
         id: makeId('as'),
         sourceRoutineSetId: set.id,
         modificationType: 'planned',
         type: set.type,
-        weight: previous?.weight ?? String(set.weight),
-        reps: previous?.reps ?? String(set.repsMin),
+        weight: String(set.weight),
+        reps: String(set.repsMin),
         targetRepsMin: set.repsMin,
         targetRepsMax: set.repsMax,
         rpe: set.rpe == null ? '' : String(set.rpe),
         rir: set.rir == null ? '' : String(set.rir),
+        prescribedWeight: set.weight,
+        prescribedRpe: set.rpe,
+        prescribedRir: set.rir,
+        effortLinked: set.effortLinked ?? true,
         completed: false,
       };
     }),
@@ -192,7 +195,8 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
   const createRoutine = (input: CreateRoutineInput) => {
     const timestamp = new Date().toISOString();
     const exercises = input.exercises.flatMap(item => {
-      const exercise = EXERCISES.find(candidate => candidate.id === item.exerciseId);
+      const exercise = EXERCISES.find(candidate => candidate.id === item.exerciseId)
+        ?? (item.name ? { id: item.exerciseId, name: item.name, muscle: item.muscle ?? 'General' } : undefined);
       if (!exercise) return [];
       return [{
         id: makeId('re'),
@@ -222,7 +226,8 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
     const existing = data.routines.find(item => item.id === id);
     const timestamp = new Date().toISOString();
     const exercises = input.exercises.flatMap(item => {
-      const exercise = EXERCISES.find(candidate => candidate.id === item.exerciseId);
+      const exercise = EXERCISES.find(candidate => candidate.id === item.exerciseId)
+        ?? (item.name ? { id: item.exerciseId, name: item.name, muscle: item.muscle ?? 'General' } : undefined);
       if (!exercise) return [];
       return [{
         id: makeId('re'),
@@ -276,7 +281,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
 
   const startWorkout = (routineId?: string) => {
     const routine = data.routines.find(item => item.id === routineId);
-    setActiveSession({
+    const session: ActiveSession = {
       id: makeId('session'),
       routineId,
       routineName: routine?.name ?? 'Entrenamiento libre',
@@ -285,12 +290,14 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       startedAt: Date.now(),
       notes: '',
       blockWeekId: routine?.blockWeekId ?? null,
-      exercises: routine?.exercises.map(exercise => toActiveExercise(exercise, data.history)) ?? [],
-    });
+      exercises: routine?.exercises.map(exercise => toActiveExercise(exercise)) ?? [],
+    };
+    setActiveSession(session);
+    return session;
   };
 
   const startWorkoutFromRoutine = (routine: Routine, context?: { blockId?: string | null; blockWeekId?: string | null }) => {
-    setActiveSession({
+    const session: ActiveSession = {
       id: makeId('session'),
       routineId: routine.id,
       routineName: routine.name,
@@ -300,8 +307,10 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       notes: '',
       blockId: context?.blockId ?? null,
       blockWeekId: context?.blockWeekId ?? routine.blockWeekId ?? null,
-      exercises: routine.exercises.map(exercise => toActiveExercise(exercise, data.history)),
-    });
+      exercises: routine.exercises.map(exercise => toActiveExercise(exercise)),
+    };
+    setActiveSession(session);
+    return session;
   };
 
   const addExerciseToActive = (exerciseId: string) => setActiveSession(current => {
@@ -315,7 +324,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
         modificationType: 'added',
         sets: [1, 2, 3].map((_, index) => {
           const previous = previousSetPerformance(data.history, exerciseId, index);
-          return { id: makeId('as'), type: 'working', weight: previous?.weight ?? '0', reps: previous?.reps ?? '5', targetRepsMin: 5, targetRepsMax: 5, rpe: '', rir: '', completed: false, modificationType: 'added' as const };
+          return { id: makeId('as'), type: 'working', weight: previous?.weight ?? '0', reps: previous?.reps ?? '5', targetRepsMin: 5, targetRepsMax: 5, rpe: '', rir: '', effortLinked: true, completed: false, modificationType: 'added' as const };
         }),
       }],
     };
@@ -327,11 +336,17 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       ...current,
       exercises: current.exercises.map(exercise => exercise.id !== exerciseId ? exercise : ({
         ...exercise,
-        sets: exercise.sets.map(set => set.id === setId ? {
-          ...set,
-          [field]: value,
-          modificationType: field !== 'weight' && set.sourceRoutineSetId ? 'edited' : set.modificationType,
-        } : set),
+        sets: exercise.sets.map(set => {
+          if (set.id !== setId) return set;
+          const effortPatch = field === 'rpe' || field === 'rir'
+            ? linkedEffortUpdate(field, value, set.effortLinked ?? true)
+            : { [field]: value };
+          return {
+            ...set,
+            ...effortPatch,
+            modificationType: set.sourceRoutineSetId ? 'edited' : set.modificationType,
+          };
+        }),
       })),
     }) : current);
   };
@@ -391,6 +406,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
           targetRepsMax: last?.targetRepsMax ?? 5,
           rpe: '',
           rir: '',
+          effortLinked: true,
           completed: false,
           modificationType: 'added',
         }],

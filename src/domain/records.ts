@@ -5,7 +5,7 @@ export type ExerciseSetEntry = { weight: number; reps: number; date: string; rpe
 export type WeightRecord = ExerciseSetEntry;
 export type VolumeRecord = { volume: number; date: string };
 export type RepCountRecord = { reps: number; weight: number; date: string };
-export type OneRmFormula = (weight: number, reps: number, rpe: number | null, rir: number | null) => number;
+export type OneRmFormula = (weight: number, reps: number, rpe: number | null, rir: number | null) => number | null;
 export type OneRmRecord = ExerciseSetEntry & { estimated1RM: number };
 
 function parseOptionalNumber(value: string): number | null {
@@ -78,6 +78,7 @@ export function bestEstimated1RM(
 ): OneRmRecord | null {
   return completedWorkingSets(history, exerciseId).reduce<OneRmRecord | null>((best, entry) => {
     const estimated1RM = formula(entry.weight, entry.reps, entry.rpe, entry.rir);
+    if (estimated1RM == null) return best;
     return !best || estimated1RM > best.estimated1RM ? { ...entry, estimated1RM } : best;
   }, null);
 }

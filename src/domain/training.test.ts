@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effortModeLabel, formatRepRange, normalizeRepRange, usesRir, usesRpe } from '@/src/domain/training';
+import { effortModeLabel, formatRepRange, linkedEffortUpdate, linkedRirFromRpe, linkedRpeFromRir, normalizeRepRange, usesRir, usesRpe } from '@/src/domain/training';
 
 describe('training helpers', () => {
   it('muestra repeticiones fijas o como rango', () => {
@@ -20,5 +20,18 @@ describe('training helpers', () => {
     expect(usesRpe('none')).toBe(false);
     expect(usesRir('none')).toBe(false);
     expect(effortModeLabel('rir')).toBe('RIR');
+  });
+});
+
+describe('RPE/RIR vinculados', () => {
+  it('convierte en ambas direcciones', () => {
+    expect(linkedRirFromRpe(8.5)).toBe(1.5);
+    expect(linkedRpeFromRir(3)).toBe(7);
+  });
+
+  it('actualiza el campo opuesto solo mientras están vinculados', () => {
+    expect(linkedEffortUpdate('rpe', '8', true)).toEqual({ rpe: '8', rir: '2' });
+    expect(linkedEffortUpdate('rir', '1.5', true)).toEqual({ rir: '1.5', rpe: '8.5' });
+    expect(linkedEffortUpdate('rpe', '8', false)).toEqual({ rpe: '8' });
   });
 });

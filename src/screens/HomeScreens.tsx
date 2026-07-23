@@ -168,7 +168,7 @@ export function AccountTypeScreen({ onDone }: { onDone(): void }) {
   </SafeAreaView>;
 }
 
-export function TrainingScreen({ onCreate, onRoutine, onHistory, onStart }: { onCreate(): void; onRoutine(routine: Routine): void; onHistory(): void; onStart(routineId?: string, context?: { blockId?: string | null; blockWeekId?: string | null }): void | Promise<void> }) {
+export function TrainingScreen({ onCreate, onRoutine, onHistory, onStart, onActivation }: { onCreate(): void; onRoutine(routine: Routine): void; onHistory(): void; onStart(routineId?: string, context?: { blockId?: string | null; blockWeekId?: string | null }): void | Promise<void>; onActivation(blockId: string): void }) {
   const { routines, history } = useAppStore();
   const [block, setBlock] = useState<AthleteBlock | null>(null);
   const [blockWeeks, setBlockWeeks] = useState<AthleteBlockWeek[]>([]);
@@ -218,6 +218,7 @@ export function TrainingScreen({ onCreate, onRoutine, onHistory, onStart }: { on
         <Card style={styles.activeBlockCard}>
           <View style={styles.blockHeading}><View style={styles.blockIcon}><Ionicons name="folder-open-outline" color={colors.orange} size={21} /></View><View style={styles.grow}><Text style={styles.cardTitle}>{block.name}</Text>{block.startDate ? <Text style={styles.dim}>Inicio {formatDate(block.startDate)}</Text> : null}</View></View>
           {block.goalText ? <Text style={styles.dim}>{block.goalText}</Text> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={`Ver Activación de ${block.name}`} onPress={() => onActivation(block.id)} style={styles.activationLink}><Ionicons name="book-outline" color={colors.orange} size={17} /><Text style={styles.activationLinkText}>Ver Activación</Text><Text style={styles.activationMeta}>Guía sin checklist</Text><Ionicons name="chevron-forward" color={colors.subtle} size={15} /></Pressable>
         </Card>
         <View style={styles.blockWeekSection}>
           <View style={styles.currentWeekHeading}><View><Text style={styles.section}>SEMANA ACTUAL</Text><Text style={styles.currentWeekTitle}>{currentWeek?.name ?? `Semana ${block.currentWeekNumber}`}</Text>{currentWeek ? <Text style={styles.dim}>{derivedWeekStartDate(block, currentWeek) ? `Desde ${formatDate(derivedWeekStartDate(block, currentWeek)!)}` : 'Avance flexible'}</Text> : null}</View><View style={styles.currentPill}><Text style={styles.currentPillText}>EN CURSO</Text></View></View>
@@ -225,7 +226,7 @@ export function TrainingScreen({ onCreate, onRoutine, onHistory, onStart }: { on
           {currentWeek && currentRoutines.length === 0 ? <Card><Text style={styles.dim}>Tu coach todavía no agregó días a esta semana.</Text></Card> : null}
           {currentRoutines.map(routine => <Card key={routine.id}>
             <View style={styles.routineHead}><View style={styles.dayBox}><Text style={styles.day}>D{routine.trainingDay}</Text><Ionicons name="barbell-outline" color={colors.dim} size={16} /></View><View style={styles.grow}><Text style={styles.routineName}>{routine.name}</Text>{routine.prescriptionNotes ? <Text style={styles.dim}>{routine.prescriptionNotes}</Text> : null}</View></View>
-            <PrimaryButton title="Empezar" onPress={() => onStart(routine.id, { blockId: block.id, blockWeekId: currentWeek?.id })} />
+            <View style={styles.routineActions}><PrimaryButton title="Empezar" onPress={() => onStart(routine.id, { blockId: block.id, blockWeekId: currentWeek?.id })} /><Pressable accessibilityRole="button" accessibilityLabel="Ver Activación" onPress={() => onActivation(block.id)} style={styles.routineActivation}><Ionicons name="book-outline" color={colors.muted} size={15} /><Text style={styles.routineActivationText}>Ver Activación</Text></Pressable></View>
           </Card>)}
         </View>
 
@@ -290,6 +291,12 @@ const styles = StyleSheet.create({
   content: { padding: 20, paddingTop: 8, gap: 14, paddingBottom: 38 },
   freeCard: { backgroundColor: '#11100f', borderColor: '#3a2417' },
   activeBlockCard: { borderColor: '#4a2816', backgroundColor: '#12100f' },
+  activationLink: { minHeight: 48, marginTop: 4, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.border, borderRadius: 11, backgroundColor: colors.background, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  activationLinkText: { color: colors.text, fontSize: 12, fontWeight: '800' },
+  activationMeta: { flex: 1, color: colors.dim, fontSize: 9, textAlign: 'right' },
+  routineActions: { gap: 4 },
+  routineActivation: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  routineActivationText: { color: colors.muted, fontSize: 10, fontWeight: '700' },
   blockHeading: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   blockIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: '#24160e', alignItems: 'center', justifyContent: 'center' },
   freeIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#24160e', alignItems: 'center', justifyContent: 'center' },

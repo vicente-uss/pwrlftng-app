@@ -32,3 +32,32 @@ export function normalizeRepRange(minimum: number, maximum: number) {
   const max = Math.max(min, Math.round(Number.isFinite(maximum) ? maximum : min));
   return { min, max };
 }
+
+function roundedEffort(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+export function linkedRirFromRpe(rpe: number): number | null {
+  if (!Number.isFinite(rpe) || rpe < 1 || rpe > 10) return null;
+  return roundedEffort(10 - rpe);
+}
+
+export function linkedRpeFromRir(rir: number): number | null {
+  if (!Number.isFinite(rir) || rir < 0 || rir > 9) return null;
+  return roundedEffort(10 - rir);
+}
+
+export function linkedEffortUpdate(
+  field: 'rpe' | 'rir',
+  value: string,
+  linked: boolean,
+): Partial<Record<'rpe' | 'rir', string>> {
+  if (!linked || !value.trim()) return { [field]: value };
+  const parsed = Number(value);
+  const counterpart = field === 'rpe' ? linkedRirFromRpe(parsed) : linkedRpeFromRir(parsed);
+  return counterpart == null
+    ? { [field]: value }
+    : field === 'rpe'
+      ? { rpe: value, rir: String(counterpart) }
+      : { rir: value, rpe: String(counterpart) };
+}

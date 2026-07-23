@@ -51,11 +51,11 @@ describe('syncDataToCloud', () => {
       ...localData,
       routines: [{
         id: 'routine-1', name: 'Rango', day: 1, effortMode: 'both', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        exercises: [{ id: 'routine-exercise-1', exerciseId: 'squat', name: 'Squat', muscle: 'Piernas', sets: [{ id: 'routine-set-1', type: 'working', weight: 100, repsMin: 5, repsMax: 7, rpe: 8, rir: 2 }] }],
+        exercises: [{ id: 'routine-exercise-1', exerciseId: 'squat', name: 'Squat', muscle: 'Piernas', sets: [{ id: 'routine-set-1', type: 'working', weight: 100, repsMin: 5, repsMax: 7, rpe: 8, rir: 2, effortLinked: false }] }],
       }],
       history: [{
         id: 'workout-1', routineName: 'Rango', effortMode: 'both', date: '2026-01-02T00:00:00.000Z', durationSeconds: 600, totalVolume: 600, setsCompleted: 1, notes: 'Buena sesión',
-        exercises: [{ id: 'workout-exercise-1', exerciseId: 'squat', name: 'Squat', muscle: 'Piernas', notes: 'Profundidad sólida', sets: [{ id: 'workout-set-1', type: 'working', weight: '100', reps: '6', targetRepsMin: 5, targetRepsMax: 7, rpe: '8', rir: '2', completed: true }] }],
+        exercises: [{ id: 'workout-exercise-1', exerciseId: 'squat', name: 'Squat', muscle: 'Piernas', notes: 'Profundidad sólida', sets: [{ id: 'workout-set-1', type: 'working', weight: '102.5', reps: '6', targetRepsMin: 5, targetRepsMax: 7, rpe: '8.5', rir: '2', prescribedWeight: 100, prescribedRpe: 8, prescribedRir: 2, effortLinked: false, completed: true }] }],
       }],
     };
 
@@ -68,9 +68,19 @@ describe('syncDataToCloud', () => {
     const workoutExercise = (mocks.writes.find(write => write.table === 'workout_exercises')?.value as Record<string, unknown>[])[0];
     const workoutSet = (mocks.writes.find(write => write.table === 'workout_sets')?.value as Record<string, unknown>[])[0];
     expect(routine.effort_mode).toBe('both');
-    expect(routineSet).toMatchObject({ reps: 5, reps_min: 5, reps_max: 7, rpe: 8, rir: 2 });
+    expect(routineSet).toMatchObject({ reps: 5, reps_min: 5, reps_max: 7, rpe: 8, rir: 2, effort_linked: false });
     expect(workout).toMatchObject({ effort_mode: 'both', notes: 'Buena sesión' });
     expect(workoutExercise.notes).toBe('Profundidad sólida');
-    expect(workoutSet).toMatchObject({ target_reps_min: 5, target_reps_max: 7, rpe: 8, rir: 2 });
+    expect(workoutSet).toMatchObject({
+      target_reps_min: 5,
+      target_reps_max: 7,
+      actual_rpe: 8.5,
+      actual_rir: 2,
+      prescribed_weight: 100,
+      prescribed_rpe: 8,
+      prescribed_rir: 2,
+      effort_linked: false,
+      estimate_confidence: 'high',
+    });
   });
 });

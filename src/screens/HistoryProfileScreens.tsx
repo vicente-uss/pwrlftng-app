@@ -3,6 +3,10 @@ import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, ConfirmDialog, PrimaryButton, TopBar, formatDate } from '@/src/components/ui';
+import { PerformanceDashboard } from '@/src/components/PerformanceDashboard';
+import { EXERCISE_CATALOG } from '@/src/data/seed';
+import { buildSessionExposures } from '@/src/domain/performance';
+import { estimatePerformedSet } from '@/src/domain/prFormulas';
 import { DEFAULT_BLOCK, REST_PRESETS, formatRestDuration, isPresetRest, parseRestDuration } from '@/src/domain/profileOptions';
 import { effortModeLabel, usesRir, usesRpe } from '@/src/domain/training';
 import { Profile, WorkoutHistory } from '@/src/domain/types';
@@ -12,10 +16,11 @@ import { AthleteProgramTree, getMyProgramTree } from '@/src/services/athleteBloc
 import { useAppStore } from '@/src/store/AppStore';
 import { colors, condensed } from '@/src/theme';
 
-export function HistoryScreen({ onSession, onExercise }: { onSession(session: WorkoutHistory): void; onExercise(exerciseId: string): void }) {
+export function HistoryScreen({ onSession, onExercise, onActivation }: { onSession(session: WorkoutHistory): void; onExercise(exerciseId: string): void; onActivation(blockId: string): void }) {
   const { history } = useAppStore();
   const [programs, setPrograms] = useState<AthleteProgramTree[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [view, setView] = useState<'sessions' | 'performance'>('sessions');
 
   useEffect(() => {
     let active = true;
@@ -32,22 +37,47 @@ export function HistoryScreen({ onSession, onExercise }: { onSession(session: Wo
       const working = exercise.sets.filter(set => set.completed && set.type === 'working');
       if (!working.length) return;
       const max = Math.max(...working.map(set => Number(set.weight) || 0));
-      const e1rm = Math.max(...working.map(set => Math.round((Number(set.weight) || 0) * (1 + (Number(set.reps) || 0) / 30))));
+      const estimates = working.flatMap(set => {
+        const estimate = estimatePerformedSet(
+          Number(set.weight),
+          Number(set.reps),
+          set.rpe.trim() ? Number(set.rpe) : null,
+          set.rir.trim() ? Number(set.rir) : null,
+        );
+        return estimate ? [estimate.value] : [];
+      });
+      const e1rm = estimates.length ? Math.max(...estimates) : 0;
       const previous = map.get(exercise.exerciseId);
       map.set(exercise.exerciseId, { exerciseId: exercise.exerciseId, name: exercise.name, max: Math.max(previous?.max ?? 0, max), e1rm: Math.max(previous?.e1rm ?? 0, e1rm), sessions: (previous?.sessions ?? 0) + 1 });
     }));
     return [...map.values()];
   }, [history]);
+  const performanceExposures = useMemo(() => buildSessionExposures(
+    history,
+    EXERCISE_CATALOG,
+    programs.flatMap(block => block.weeks.filter(week => !week.isWarmup).map(week => ({
+      id: week.id,
+      name: week.name,
+      order: week.weekNumber,
+      mesocycleId: block.id,
+      mesocycleName: block.name,
+    }))),
+  ), [history, programs]);
 
   return <View style={styles.fill}>
     <TopBar title="Historial" />
     <ScrollView contentContainerStyle={styles.content}>
+      <View accessibilityRole="tablist" style={styles.historyTabs}>
+        <Pressable accessibilityRole="tab" accessibilityState={{ selected: view === 'sessions' }} onPress={() => setView('sessions')} style={[styles.historyTab, view === 'sessions' && styles.historyTabActive]}><Text style={[styles.historyTabText, view === 'sessions' && styles.historyTabTextActive]}>Sesiones</Text></Pressable>
+        <Pressable accessibilityRole="tab" accessibilityState={{ selected: view === 'performance' }} onPress={() => setView('performance')} style={[styles.historyTab, view === 'performance' && styles.historyTabActive]}><Text style={[styles.historyTabText, view === 'performance' && styles.historyTabTextActive]}>Rendimiento</Text></Pressable>
+      </View>
+      {view === 'performance' ? <PerformanceDashboard exposures={performanceExposures} /> : <>
       <Text style={styles.section}>BLOQUES</Text>
       {programs.map(block => {
         const open = Boolean(expanded[block.id]);
         return <View key={block.id} style={styles.historyFolder}>
           <Pressable accessibilityRole="button" accessibilityLabel={`${open ? 'Cerrar' : 'Abrir'} ${block.name}`} onPress={() => toggleFolder(block.id)} style={styles.historyFolderHeader}><Ionicons name={open ? 'folder-open-outline' : 'folder-outline'} color={colors.orange} size={20} /><View style={styles.grow}><Text style={styles.strong}>{block.name}</Text><Text style={styles.dim}>{block.weeks.length} semanas · {block.status === 'archived' ? 'Archivado' : block.status === 'completed' ? 'Completado' : block.startDate ? 'Planificación' : 'Sin fecha'}</Text></View><Ionicons name={open ? 'chevron-up' : 'chevron-down'} color={colors.dim} size={16} /></Pressable>
-          {open ? <View style={styles.historyFolderBody}>{block.weeks.map(week => {
+          {open ? <View style={styles.historyFolderBody}><Pressable accessibilityRole="button" accessibilityLabel={`Ver Activación de ${block.name}`} onPress={() => onActivation(block.id)} style={styles.activationHistoryRow}><Ionicons name="book-outline" color={colors.orange} size={17} /><View style={styles.grow}><Text style={styles.strong}>Activación</Text><Text style={styles.dim}>Recurso permanente · Sin progreso</Text></View><Ionicons name="chevron-forward" color={colors.subtle} size={15} /></Pressable>{block.weeks.filter(week => !week.isWarmup).map(week => {
             const weekOpen = Boolean(expanded[week.id]);
             return <View key={week.id} style={styles.historyWeek}><Pressable accessibilityRole="button" accessibilityLabel={`${weekOpen ? 'Cerrar' : 'Abrir'} ${week.name}`} onPress={() => toggleFolder(week.id)} style={styles.historyWeekHeader}><Ionicons name={weekOpen ? 'chevron-down' : 'chevron-forward'} color={colors.dim} size={15} /><View style={styles.grow}><Text style={styles.strong}>{week.name}</Text><Text style={styles.dim}>{week.routines.length} días{week.status === 'completed' ? ' · Completada' : ''}</Text></View></Pressable>{weekOpen ? <View style={styles.historyDays}>{week.routines.map(routine => <View key={routine.id} style={styles.historyDay}><Text style={styles.dayBadge}>D{routine.trainingDay}</Text><Text style={styles.noteText}>{routine.name}</Text></View>)}{!week.routines.length ? <Text style={styles.dim}>Sin días publicados.</Text> : null}</View> : null}</View>;
           })}</View> : null}
@@ -73,6 +103,7 @@ export function HistoryScreen({ onSession, onExercise }: { onSession(session: Wo
       <Text style={styles.section}>RÉCORDS POR EJERCICIO</Text>
       {records.map(record => <Pressable accessibilityRole="button" accessibilityLabel={`Ver ejercicio ${record.name}`} key={record.exerciseId} onPress={() => onExercise(record.exerciseId)} style={styles.record}><View style={styles.recordIcon}><Ionicons name="trophy-outline" color={colors.orange} size={17} /></View><View style={styles.grow}><Text style={styles.strong}>{record.name}</Text><Text style={styles.dim}>{record.sessions} {record.sessions === 1 ? 'sesión registrada' : 'sesiones registradas'}</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.max}kg</Text><Text style={styles.metricLabel}>MÁXIMO</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.e1rm}kg</Text><Text style={styles.metricLabel}>E1RM</Text></View></Pressable>)}
       {records.length === 0 ? <Text style={styles.emptyHint}>Tus récords aparecerán después de completar series de trabajo.</Text> : null}
+      </>}
     </ScrollView>
   </View>;
 }
@@ -275,9 +306,9 @@ export function ProfileScreen({ onSignOut, onExercises, onAthletes, onAccountTyp
         </Pressable>
       </Card> : null}
 
-      {role?.role === 'coach' ? <Pressable accessibilityRole="button" accessibilityLabel="Mis atletas" onPress={onAthletes} style={styles.exercisesButton}>
-        <View style={styles.exercisesIcon}><Ionicons name="people-outline" color={colors.orange} size={18} /></View>
-        <View style={styles.grow}><Text style={styles.strong}>Mis atletas</Text><Text style={styles.dim}>Rutinas, entrenamientos y comentarios de tus atletas</Text></View>
+      {role?.role === 'coach' ? <Pressable accessibilityRole="button" accessibilityLabel="Panel de coaching" onPress={onAthletes} style={styles.exercisesButton}>
+        <View style={styles.exercisesIcon}><Ionicons name="grid-outline" color={colors.orange} size={18} /></View>
+        <View style={styles.grow}><Text style={styles.strong}>Panel de coaching</Text><Text style={styles.dim}>Atletas, programaciones, asignaciones y rendimiento</Text></View>
         <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
       </Pressable> : null}
 
@@ -294,10 +325,16 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   grow: { flex: 1 },
   content: { padding: 20, gap: 12, paddingBottom: 42 },
+  historyTabs: { flexDirection: 'row', borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 3 },
+  historyTab: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
+  historyTabActive: { backgroundColor: colors.elevated },
+  historyTabText: { color: colors.dim, fontSize: 12, fontWeight: '800' },
+  historyTabTextActive: { color: colors.orange },
   section: { color: colors.dim, fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginTop: 8 },
   historyFolder: { borderWidth: 1, borderColor: colors.border, borderRadius: 13, backgroundColor: colors.surface, overflow: 'hidden' },
   historyFolderHeader: { padding: 13, minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 10 },
   historyFolderBody: { padding: 9, gap: 7, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  activationHistoryRow: { minHeight: 56, padding: 10, borderWidth: 1, borderColor: '#3b2518', borderRadius: 10, backgroundColor: '#15100d', flexDirection: 'row', alignItems: 'center', gap: 9 },
   historyWeek: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.background, overflow: 'hidden' },
   historyWeekHeader: { padding: 10, minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 8 },
   historyDays: { padding: 8, gap: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },

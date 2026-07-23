@@ -1,5 +1,6 @@
 import { ActiveExercise, ActiveSet, EffortMode, PersistedData, Profile, Routine, RoutineExercise, RoutineSet, SetType, WorkoutHistory, WorkoutModification } from '@/src/domain/types';
 import { isEffortMode } from '@/src/domain/training';
+import { estimatePerformedSet } from '@/src/domain/prFormulas';
 import { supabase } from '@/src/lib/supabase';
 import { mergePersistedData, withoutDeletedRoutines } from '@/src/services/syncMerge';
 import { migratePrototypeData } from '@/src/storage/dataMigrations';
@@ -11,10 +12,10 @@ type RemoteProfile = { display_name: string | null; body_weight: number | string
 type RemoteExercise = { id: string; name: string; muscle: string };
 type RemoteRoutine = { id: string; name: string; training_day: number; effort_mode: string; created_at: string; updated_at: string; block_week_id: string | null };
 type RemoteRoutineExercise = { id: string; routine_id: string; exercise_id: string; position: number };
-type RemoteRoutineSet = { id: string; routine_exercise_id: string; position: number; set_type: string; weight: number | string; reps: number; reps_min: number | null; reps_max: number | null; rpe: number | string | null; rir: number | string | null };
+type RemoteRoutineSet = { id: string; routine_exercise_id: string; position: number; set_type: string; weight: number | string; reps: number; reps_min: number | null; reps_max: number | null; rpe: number | string | null; rir: number | string | null; effort_linked: boolean };
 type RemoteWorkout = { id: string; routine_id: string | null; block_id: string | null; block_week_id: string | null; athlete_modified: boolean; routine_name: string; effort_mode: string; notes: string | null; completed_at: string; duration_seconds: number; total_volume: number | string; sets_completed: number };
 type RemoteWorkoutExercise = { id: string; workout_id: string; exercise_id: string; exercise_name: string; muscle: string; notes: string | null; position: number; source_routine_exercise_id: string | null; modification_type: string };
-type RemoteWorkoutSet = { id: string; workout_exercise_id: string; position: number; set_type: string; weight: number | string; reps: number; target_reps_min: number | null; target_reps_max: number | null; rpe: number | string | null; rir: number | string | null; completed: boolean; completed_at: string | null; source_routine_set_id: string | null; modification_type: string };
+type RemoteWorkoutSet = { id: string; workout_exercise_id: string; position: number; set_type: string; weight: number | string; reps: number; target_reps_min: number | null; target_reps_max: number | null; rpe: number | string | null; rir: number | string | null; actual_rpe: number | string | null; actual_rir: number | string | null; prescribed_weight: number | string | null; prescribed_rpe: number | string | null; prescribed_rir: number | string | null; effort_linked: boolean; completed: boolean; completed_at: string | null; source_routine_set_id: string | null; modification_type: string };
 type RemoteTombstone = { entity_type: string; record_id: string; deleted_at: string };
 
 const pulledUsers = new Set<string>();
@@ -49,10 +50,10 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
     supabase.from('exercises').select('id,name,muscle'),
     supabase.from('routines').select('id,name,training_day,effort_mode,created_at,updated_at,block_week_id').eq('user_id', userId).order('training_day'),
     supabase.from('routine_exercises').select('id,routine_id,exercise_id,position').eq('user_id', userId).order('position'),
-    supabase.from('routine_sets').select('id,routine_exercise_id,position,set_type,weight,reps,reps_min,reps_max,rpe,rir').eq('user_id', userId).order('position'),
+    supabase.from('routine_sets').select('id,routine_exercise_id,position,set_type,weight,reps,reps_min,reps_max,rpe,rir,effort_linked').eq('user_id', userId).order('position'),
     supabase.from('workouts').select('id,routine_id,block_id,block_week_id,athlete_modified,routine_name,effort_mode,notes,completed_at,duration_seconds,total_volume,sets_completed').eq('user_id', userId).order('completed_at', { ascending: false }),
     supabase.from('workout_exercises').select('id,workout_id,exercise_id,exercise_name,muscle,notes,position,source_routine_exercise_id,modification_type').eq('user_id', userId).order('position'),
-    supabase.from('workout_sets').select('id,workout_exercise_id,position,set_type,weight,reps,target_reps_min,target_reps_max,rpe,rir,completed,completed_at,source_routine_set_id,modification_type').eq('user_id', userId).order('position'),
+    supabase.from('workout_sets').select('id,workout_exercise_id,position,set_type,weight,reps,target_reps_min,target_reps_max,rpe,rir,actual_rpe,actual_rir,prescribed_weight,prescribed_rpe,prescribed_rir,effort_linked,completed,completed_at,source_routine_set_id,modification_type').eq('user_id', userId).order('position'),
     supabase.from('deletion_tombstones').select('entity_type,record_id,deleted_at').eq('user_id', userId),
   ]);
 
@@ -84,6 +85,7 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
           repsMax: set.reps_max ?? set.reps,
           rpe: set.rpe == null ? undefined : Number(set.rpe),
           rir: set.rir == null ? undefined : Number(set.rir),
+          effortLinked: set.effort_linked,
         })),
       };
     }),
@@ -119,8 +121,12 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
         reps: String(set.reps),
         targetRepsMin: set.target_reps_min ?? set.reps,
         targetRepsMax: set.target_reps_max ?? set.reps,
-        rpe: set.rpe == null ? '' : String(set.rpe),
-        rir: set.rir == null ? '' : String(set.rir),
+        rpe: (set.actual_rpe ?? set.rpe) == null ? '' : String(set.actual_rpe ?? set.rpe),
+        rir: (set.actual_rir ?? set.rir) == null ? '' : String(set.actual_rir ?? set.rir),
+        prescribedWeight: set.prescribed_weight == null ? undefined : Number(set.prescribed_weight),
+        prescribedRpe: set.prescribed_rpe == null ? undefined : Number(set.prescribed_rpe),
+        prescribedRir: set.prescribed_rir == null ? undefined : Number(set.prescribed_rir),
+        effortLinked: set.effort_linked,
         completed: set.completed,
         completedAt: set.completed_at ?? undefined,
         sourceRoutineSetId: set.source_routine_set_id ?? undefined,
@@ -188,16 +194,31 @@ export async function syncDataToCloud(data: PersistedData): Promise<PushResult> 
     ensure(routinesResult.error);
     const routineExercises = liveRoutines.flatMap(routine => routine.exercises.map((exercise, position) => ({ id: exercise.id, user_id: userId, routine_id: routine.id, exercise_id: exercise.exerciseId, position })));
     if (routineExercises.length) { const result = await supabase.from('routine_exercises').upsert(routineExercises); ensure(result.error); }
-    const routineSets = liveRoutines.flatMap(routine => routine.exercises.flatMap(exercise => exercise.sets.map((set, position) => ({ id: set.id, user_id: userId, routine_exercise_id: exercise.id, position, set_type: set.type, weight: set.weight, reps: set.repsMin, reps_min: set.repsMin, reps_max: set.repsMax, rpe: set.rpe ?? null, rir: set.rir ?? null }))));
+    const routineSets = liveRoutines.flatMap(routine => routine.exercises.flatMap(exercise => exercise.sets.map((set, position) => ({ id: set.id, user_id: userId, routine_exercise_id: exercise.id, position, set_type: set.type, weight: set.weight, reps: set.repsMin, reps_min: set.repsMin, reps_max: set.repsMax, rpe: set.rpe ?? null, rir: set.rir ?? null, effort_linked: set.effortLinked ?? true }))));
     if (routineSets.length) { const result = await supabase.from('routine_sets').upsert(routineSets); ensure(result.error); }
   }
 
   if (data.history.length) {
     const workoutsResult = await supabase.from('workouts').upsert(data.history.map(workout => ({ id: workout.id, user_id: userId, routine_id: workout.routineId ?? null, block_id: workout.blockId ?? null, block_week_id: workout.blockWeekId ?? null, athlete_modified: workout.athleteModified ?? false, routine_name: workout.routineName, effort_mode: workout.effortMode, notes: workout.notes || null, started_at: new Date(new Date(workout.date).getTime() - workout.durationSeconds * 1000).toISOString(), completed_at: workout.date, duration_seconds: workout.durationSeconds, total_volume: workout.totalVolume, sets_completed: workout.setsCompleted })));
     ensure(workoutsResult.error);
-    const workoutExercises = data.history.flatMap(workout => workout.exercises.map((exercise, position) => ({ id: exercise.id, user_id: userId, workout_id: workout.id, exercise_id: exercise.exerciseId, exercise_name: exercise.name, muscle: exercise.muscle, notes: exercise.notes || null, position, source_routine_exercise_id: exercise.sourceRoutineExerciseId ?? null, modification_type: exercise.modificationType ?? 'planned' })));
+    const workoutExercises = data.history.flatMap(workout => workout.exercises.map((exercise, position) => {
+      const estimates = exercise.sets.flatMap(set => {
+        if (!set.completed || set.type !== 'working') return [];
+        const estimate = estimatePerformedSet(Number(set.weight), Number(set.reps), optionalEffort(set.rpe, 1), optionalEffort(set.rir, 0));
+        return estimate ? [estimate] : [];
+      });
+      const best = estimates.reduce<typeof estimates[number] | null>((winner, estimate) => !winner || estimate.value > winner.value ? estimate : winner, null);
+      return { id: exercise.id, user_id: userId, workout_id: workout.id, exercise_id: exercise.exerciseId, exercise_name: exercise.name, muscle: exercise.muscle, notes: exercise.notes || null, position, source_routine_exercise_id: exercise.sourceRoutineExerciseId ?? null, modification_type: exercise.modificationType ?? 'planned', best_e1rm: best?.value ?? null, best_e1rm_confidence: best?.confidence ?? null, e1rm_formula_version: best?.formulaVersion ?? null };
+    }));
     if (workoutExercises.length) { const result = await supabase.from('workout_exercises').upsert(workoutExercises); ensure(result.error); }
-    const workoutSets = data.history.flatMap(workout => workout.exercises.flatMap(exercise => exercise.sets.map((set, position) => ({ id: set.id, user_id: userId, workout_exercise_id: exercise.id, position, set_type: set.type, weight: Number(set.weight) || 0, reps: Number(set.reps) || 0, target_reps_min: set.targetRepsMin, target_reps_max: set.targetRepsMax, rpe: optionalEffort(set.rpe, 1), rir: optionalEffort(set.rir, 0), completed: set.completed, completed_at: set.completedAt ?? null, source_routine_set_id: set.sourceRoutineSetId ?? null, modification_type: set.modificationType ?? 'planned' }))));
+    const workoutSets = data.history.flatMap(workout => workout.exercises.flatMap(exercise => exercise.sets.map((set, position) => {
+      const actualRpe = optionalEffort(set.rpe, 1);
+      const actualRir = optionalEffort(set.rir, 0);
+      const estimate = set.completed && set.type === 'working'
+        ? estimatePerformedSet(Number(set.weight), Number(set.reps), actualRpe, actualRir)
+        : null;
+      return { id: set.id, user_id: userId, workout_exercise_id: exercise.id, position, set_type: set.type, weight: Number(set.weight) || 0, reps: Number(set.reps) || 0, target_reps_min: set.targetRepsMin, target_reps_max: set.targetRepsMax, rpe: actualRpe, rir: actualRir, actual_rpe: actualRpe, actual_rir: actualRir, prescribed_weight: set.prescribedWeight ?? null, prescribed_rpe: set.prescribedRpe ?? null, prescribed_rir: set.prescribedRir ?? null, effort_linked: set.effortLinked ?? true, estimated_1rm: estimate?.value ?? null, estimate_confidence: estimate?.confidence ?? null, estimate_formula_version: estimate?.formulaVersion ?? null, completed: set.completed, completed_at: set.completedAt ?? null, source_routine_set_id: set.sourceRoutineSetId ?? null, modification_type: set.modificationType ?? 'planned' };
+    })));
     if (workoutSets.length) { const result = await supabase.from('workout_sets').upsert(workoutSets); ensure(result.error); }
   }
 

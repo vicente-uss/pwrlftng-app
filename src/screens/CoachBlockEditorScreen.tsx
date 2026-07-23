@@ -4,14 +4,20 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { ConfirmDialog, PrimaryButton, TopBar } from '@/src/components/ui';
 import { ExercisePicker } from '@/src/components/ExercisePicker';
 import { EXERCISE_CATALOG } from '@/src/data/seed';
-import { EFFORT_MODES, usesRir, usesRpe } from '@/src/domain/training';
+import { EFFORT_MODES, linkedEffortUpdate, usesRir, usesRpe } from '@/src/domain/training';
 import { EffortMode, Exercise, makeId } from '@/src/domain/types';
 import { DraftInput, RepsControl } from '@/src/screens/RoutineScreens';
-import { BlockDraftWeek, getCoachBlockDraft, saveAthleteBlock, saveCoachTemplate } from '@/src/services/coachService';
+import { BlockDraftInfo, BlockDraftWeek, getCoachBlockDraft, saveAthleteBlock, saveCoachTemplate } from '@/src/services/coachService';
 import { ProgramWeekType } from '@/src/services/athleteBlockService';
+import {
+  CoachProgramKind,
+  getCoachLibraryProgramDraft,
+  saveCoachLibraryProgram,
+} from '@/src/services/coachProgramService';
 import { colors, condensed } from '@/src/theme';
+import { ActivationResource, saveActivationResource } from '@/src/services/activationService';
 
-type DraftSet = { id: string; weight: string; repsMin: string; repsMax: string; rpe: string; rir: string };
+type DraftSet = { id: string; weight: string; repsMin: string; repsMax: string; rpe: string; rir: string; effortLinked: boolean };
 type DraftField = 'weight' | 'repsMin' | 'repsMax' | 'rpe' | 'rir';
 type DraftExercise = { id: string; exerciseId: string; sets: DraftSet[] };
 type DraftDay = { id: string; name: string; effortMode: EffortMode; prescriptionNotes: string; status: 'draft' | 'published'; exercises: DraftExercise[] };
@@ -21,7 +27,7 @@ type ConfirmState = { title: string; message: string; confirmLabel: string; onCo
 const MAX_DAYS_PER_WEEK = 7;
 
 function blankDraftSet(): DraftSet {
-  return { id: makeId('block-set'), weight: '', repsMin: '5', repsMax: '5', rpe: '8', rir: '2' };
+  return { id: makeId('block-set'), weight: '', repsMin: '5', repsMax: '5', rpe: '8', rir: '2', effortLinked: true };
 }
 
 function newDraftExercise(exerciseId: string): DraftExercise {
@@ -49,9 +55,9 @@ function newWeek(weekNumber: number, isWarmup: boolean): DraftWeek {
   };
 }
 
-function seedWeeks(totalWeeks: number): DraftWeek[] {
+function seedWeeks(totalWeeks: number, includeActivation: boolean): DraftWeek[] {
   const numbered = Array.from({ length: Math.max(1, totalWeeks) }, (_, index) => newWeek(index + 1, false));
-  return [newWeek(0, true), ...numbered];
+  return includeActivation ? [newWeek(0, true), ...numbered] : numbered;
 }
 
 function optionalNumber(value: string) {
@@ -92,7 +98,28 @@ function isoToDisplay(value: string | null) {
 const WEEK_TYPES: ProgramWeekType[] = ['training', 'low_stress', 'deload', 'closing'];
 const WEEK_TYPE_LABELS: Record<ProgramWeekType, string> = { activation: 'Activación', training: 'Entrenamiento', low_stress: 'Low stress', deload: 'Deload', closing: 'Cierre' };
 
-export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: { athleteId: string; blockId?: string | null; onBack(): void; onSaved(): void }) {
+type CoachBlockEditorProps = {
+  athleteId?: string | null;
+  blockId?: string | null;
+  programId?: string | null;
+  programKind?: CoachProgramKind;
+  initialDraft?: { info: BlockDraftInfo; weeks: BlockDraftWeek[] } | null;
+  initialActivation?: ActivationResource | null;
+  onBack(): void;
+  onSaved(savedId?: string): void;
+};
+
+export function CoachBlockEditorScreen({
+  athleteId,
+  blockId,
+  programId,
+  programKind = 'mesocycle',
+  initialDraft,
+  initialActivation,
+  onBack,
+  onSaved,
+}: CoachBlockEditorProps) {
+  const libraryMode = !athleteId;
   const [step, setStep] = useState<1 | 2>(1);
   const [blockName, setBlockName] = useState('');
   const [goalText, setGoalText] = useState('');
@@ -104,25 +131,66 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [loading, setLoading] = useState(Boolean(blockId));
-  const [loadedBlockId, setLoadedBlockId] = useState<string | null>(blockId ?? null);
+  const [loading, setLoading] = useState(Boolean(blockId || programId));
+  const [loadedBlockId, setLoadedBlockId] = useState<string | null>(blockId ?? programId ?? null);
   const [blockStatus, setBlockStatus] = useState<'draft' | 'published' | 'completed' | 'archived'>('published');
   const [currentWeekNumber, setCurrentWeekNumber] = useState(1);
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [exerciseCatalog, setExerciseCatalog] = useState<Exercise[]>(EXERCISE_CATALOG);
 
   useEffect(() => {
-    if (!blockId) return;
+    if (initialDraft && !blockId && !programId) {
+      setBlockName(initialDraft.info.name);
+      setGoalText(initialDraft.info.goalText ?? '');
+      setStartDateDisplay(isoToDisplay(initialDraft.info.startDate));
+      setWeeksText(String(initialDraft.info.totalWeeks));
+      setWeeks(initialDraft.weeks.map(week => ({
+        id: week.id ?? makeId('program-week'),
+        name: week.name,
+        weekNumber: week.weekNumber,
+        isWarmup: false,
+        weekType: week.weekType === 'activation' ? 'training' : week.weekType ?? 'training',
+        status: week.status ?? 'published',
+        startDateOverride: week.startDateOverride ?? null,
+        days: week.days.map(day => ({
+          id: day.id ?? makeId('program-day'),
+          name: day.name,
+          effortMode: day.effortMode,
+          prescriptionNotes: day.prescriptionNotes ?? '',
+          status: day.status ?? 'published',
+          exercises: day.exercises.map(exercise => ({
+            id: exercise.id ?? makeId('program-exercise'),
+            exerciseId: exercise.exerciseId,
+            sets: exercise.sets.map(set => ({
+              id: set.id ?? makeId('program-set'),
+              weight: String(set.weight || ''),
+              repsMin: String(set.repsMin),
+              repsMax: String(set.repsMax),
+              rpe: set.rpe == null ? '' : String(set.rpe),
+              rir: set.rir == null ? '' : String(set.rir),
+              effortLinked: set.effortLinked ?? true,
+            })),
+          })),
+        })),
+      })));
+      return;
+    }
+    const editingId = programId ?? blockId;
+    if (!editingId) return;
     let active = true;
-    getCoachBlockDraft(blockId).then(({ info, weeks: remoteWeeks }) => {
+    const loadDraft = programId
+      ? getCoachLibraryProgramDraft(programId)
+      : getCoachBlockDraft(editingId);
+    loadDraft.then(({ info, weeks: remoteWeeks }) => {
       if (!active) return;
-      setLoadedBlockId(info.id ?? blockId);
+      setLoadedBlockId(info.id ?? editingId);
       setBlockName(info.name);
       setGoalText(info.goalText ?? '');
       setStartDateDisplay(isoToDisplay(info.startDate));
       setWeeksText(String(info.totalWeeks));
       setBlockStatus(info.status ?? 'published');
       setCurrentWeekNumber(info.currentWeekNumber ?? 1);
-      setWeeks(remoteWeeks.map(week => ({
+      setWeeks(remoteWeeks.filter(week => !week.isWarmup).map(week => ({
         id: week.id ?? makeId('block-week'),
         name: week.name,
         weekNumber: week.weekNumber,
@@ -139,13 +207,13 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
           exercises: day.exercises.map(exercise => ({
             id: exercise.id ?? makeId('block-ex'),
             exerciseId: exercise.exerciseId,
-            sets: exercise.sets.map(set => ({ id: set.id ?? makeId('block-set'), weight: String(set.weight || ''), repsMin: String(set.repsMin), repsMax: String(set.repsMax), rpe: set.rpe == null ? '' : String(set.rpe), rir: set.rir == null ? '' : String(set.rir) })),
+            sets: exercise.sets.map(set => ({ id: set.id ?? makeId('block-set'), weight: String(set.weight || ''), repsMin: String(set.repsMin), repsMax: String(set.repsMax), rpe: set.rpe == null ? '' : String(set.rpe), rir: set.rir == null ? '' : String(set.rir), effortLinked: set.effortLinked ?? true })),
           })),
         })),
       })));
-    }).catch(cause => setSaveError(cause instanceof Error ? cause.message : 'No pudimos cargar el bloque.')).finally(() => { if (active) setLoading(false); });
+    }).catch(cause => setSaveError(cause instanceof Error ? cause.message : 'No pudimos cargar la programación.')).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [blockId]);
+  }, [blockId, initialDraft, programId]);
 
   const parsedWeeks = Math.max(1, Math.min(52, Math.round(Number(weeksText) || 0)));
   const startDateInvalid = startDateDisplay.length > 0 && displayDateToIso(startDateDisplay) === null;
@@ -153,7 +221,7 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
 
   const goToDays = () => {
     if (step1Disabled) return;
-    setWeeks(current => current.length ? current : seedWeeks(parsedWeeks));
+    setWeeks(current => current.length ? current : seedWeeks(parsedWeeks, false));
     setStep(2);
   };
 
@@ -237,6 +305,7 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
             repsMax: last?.repsMax ?? '5',
             rpe: last?.rpe ?? '8',
             rir: last?.rir ?? '2',
+            effortLinked: last?.effortLinked ?? true,
           }],
         };
       }),
@@ -261,7 +330,24 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
       ...day,
       exercises: day.exercises.map(exercise => exercise.id !== exerciseDraftId ? exercise : ({
         ...exercise,
-        sets: exercise.sets.map(set => set.id === setId ? { ...set, [field]: value } : set),
+        sets: exercise.sets.map(set => {
+          if (set.id !== setId) return set;
+          const patch = field === 'rpe' || field === 'rir'
+            ? linkedEffortUpdate(field, value, set.effortLinked)
+            : { [field]: value };
+          return { ...set, ...patch };
+        }),
+      })),
+    })),
+  })));
+
+  const toggleEffortLinked = (weekId: string, dayId: string, exerciseDraftId: string, setId: string) => setWeeks(current => current.map(week => week.id !== weekId ? week : ({
+    ...week,
+    days: week.days.map(day => day.id !== dayId ? day : ({
+      ...day,
+      exercises: day.exercises.map(exercise => exercise.id !== exerciseDraftId ? exercise : ({
+        ...exercise,
+        sets: exercise.sets.map(set => set.id === setId ? { ...set, effortLinked: !set.effortLinked } : set),
       })),
     })),
   })));
@@ -324,6 +410,7 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
                 repsMax: Math.max(0, Math.round(Number(set.repsMax) || 0)),
                 rpe: usesRpe(day.effortMode) ? optionalNumber(set.rpe) : null,
                 rir: usesRir(day.effortMode) ? optionalNumber(set.rir) : null,
+                effortLinked: set.effortLinked,
               })),
             })),
           })),
@@ -337,9 +424,17 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
         status: startDateDisplay ? (blockStatus === 'draft' ? 'published' : blockStatus) : 'draft',
         currentWeekNumber,
       } as const;
-      await saveAthleteBlock(athleteId, infoPayload, payload);
-      if (saveAsTemplate) await saveCoachTemplate('block', blockName.trim(), { info: { ...infoPayload, id: undefined }, weeks: payload });
-      onSaved();
+      if (athleteId) {
+        const savedId = await saveAthleteBlock(athleteId, infoPayload, payload);
+        if (saveAsTemplate) await saveCoachTemplate('block', blockName.trim(), { info: { ...infoPayload, id: undefined }, weeks: payload });
+        onSaved(savedId);
+      } else {
+        const savedId = await saveCoachLibraryProgram(infoPayload, payload, programKind);
+        if (initialActivation) {
+          await saveActivationResource({ programId: savedId }, initialActivation);
+        }
+        onSaved(savedId);
+      }
     } catch (cause) {
       console.error('coach block save error', cause);
       const remote = cause as { message?: string; error_description?: string } | null;
@@ -366,14 +461,18 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
     });
   };
 
-  if (loading) return <View style={styles.fill}><TopBar title="Cargando bloque" onBack={onBack} /><View style={styles.loadingState}><Text style={styles.warning}>Preparando la planificación…</Text></View></View>;
+  const entityLabel = libraryMode
+    ? programKind === 'template' ? 'plantilla' : 'mesociclo'
+    : 'bloque';
+
+  if (loading) return <View style={styles.fill}><TopBar title={`Cargando ${entityLabel}`} onBack={onBack} /><View style={styles.loadingState}><Text style={styles.warning}>Preparando la planificación…</Text></View></View>;
 
   if (step === 1) {
     return <View style={styles.fill}>
-      <TopBar title={loadedBlockId ? 'Editar bloque' : 'Nuevo bloque'} onBack={onBack} />
+      <TopBar title={loadedBlockId ? `Editar ${entityLabel}` : `Nuevo ${entityLabel}`} onBack={onBack} />
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <Text style={styles.label}>NOMBRE DEL BLOQUE</Text>
-        <TextInput accessibilityLabel="Nombre del bloque" value={blockName} onChangeText={setBlockName} placeholder="Ej. Mesociclo IV" placeholderTextColor={colors.subtle} style={styles.input} />
+        <Text style={styles.label}>NOMBRE</Text>
+        <TextInput accessibilityLabel={`Nombre del ${entityLabel}`} value={blockName} onChangeText={setBlockName} placeholder="Ej. Mesociclo IV" placeholderTextColor={colors.subtle} style={styles.input} />
 
         <Text style={styles.label}>META</Text>
         <TextInput accessibilityLabel="Meta del bloque" value={goalText} onChangeText={setGoalText} placeholder="Ej. Fuerza base III" placeholderTextColor={colors.subtle} style={styles.input} />
@@ -394,7 +493,7 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
         <Text style={styles.label}>DURACIÓN EN SEMANAS</Text>
         <TextInput accessibilityLabel="Duración en semanas" value={weeksText} onChangeText={setWeeksText} keyboardType="number-pad" placeholder="Ej. 4" placeholderTextColor={colors.subtle} style={styles.input} />
 
-        <Pressable accessibilityRole="switch" accessibilityState={{ checked: saveAsTemplate }} accessibilityLabel="Guardar también como plantilla" onPress={() => setSaveAsTemplate(value => !value)} style={[styles.templateToggle, saveAsTemplate && styles.templateToggleActive]}><View style={[styles.templateCheck, saveAsTemplate && styles.templateCheckActive]}>{saveAsTemplate ? <Ionicons name="checkmark" color={colors.canvas} size={14} /> : null}</View><View style={styles.grow}><Text style={styles.strong}>Guardar también como plantilla</Text><Text style={styles.dim}>Quedará disponible solo en tu cuenta de coach para reutilizarla.</Text></View></Pressable>
+        {!libraryMode ? <Pressable accessibilityRole="switch" accessibilityState={{ checked: saveAsTemplate }} accessibilityLabel="Guardar también como plantilla" onPress={() => setSaveAsTemplate(value => !value)} style={[styles.templateToggle, saveAsTemplate && styles.templateToggleActive]}><View style={[styles.templateCheck, saveAsTemplate && styles.templateCheckActive]}>{saveAsTemplate ? <Ionicons name="checkmark" color={colors.canvas} size={14} /> : null}</View><View style={styles.grow}><Text style={styles.strong}>Guardar también como plantilla anterior</Text><Text style={styles.dim}>Se conserva por compatibilidad con el flujo previo.</Text></View></Pressable> : null}
 
         <PrimaryButton title="Siguiente" onPress={goToDays} disabled={step1Disabled} />
       </ScrollView>
@@ -402,7 +501,7 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
   }
 
   return <View style={styles.fill}>
-    <TopBar title={blockName} eyebrow={loadedBlockId ? 'EDITAR BLOQUE' : 'NUEVO BLOQUE'} onBack={() => setStep(1)} action={<Pressable accessibilityRole="button" accessibilityLabel="Guardar bloque" disabled={disabled || saving} onPress={save}><Text style={[styles.save, (disabled || saving) && styles.saveDisabled]}>{saving ? 'Guardando…' : 'Guardar'}</Text></Pressable>} />
+    <TopBar title={blockName} eyebrow={loadedBlockId ? `EDITAR ${entityLabel.toUpperCase()}` : `NUEVO ${entityLabel.toUpperCase()}`} onBack={() => setStep(1)} action={<Pressable accessibilityRole="button" accessibilityLabel={`Guardar ${entityLabel}`} disabled={disabled || saving} onPress={save}><Text style={[styles.save, (disabled || saving) && styles.saveDisabled]}>{saving ? 'Guardando…' : 'Guardar'}</Text></Pressable>} />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
       {weeks.map(week => {
         const isOpen = Boolean(expanded[week.id]);
@@ -474,7 +573,7 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
               <TextInput accessibilityLabel={`Indicaciones para ${day.name}`} value={day.prescriptionNotes} onChangeText={value => updateDayNotes(week.id, day.id, value)} placeholder="Indicaciones del día, rango de kilos o notas para el atleta" placeholderTextColor={colors.subtle} multiline maxLength={4000} style={styles.notesInput} />
 
               {day.exercises.map(draft => {
-                const exercise = EXERCISE_CATALOG.find(item => item.id === draft.exerciseId);
+                const exercise = exerciseCatalog.find(item => item.id === draft.exerciseId);
                 if (!exercise) return null;
                 return <View key={draft.id} style={styles.exerciseSelector}>
                   <Pressable
@@ -508,6 +607,10 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
                         {usesRpe(day.effortMode) && <DraftInput label="RPE @" accessibilityLabel={`RPE serie ${index + 1}`} value={set.rpe} onChange={value => updateSet(week.id, day.id, draft.id, set.id, 'rpe', value)} decimal />}
                         {usesRir(day.effortMode) && <DraftInput label="RIR" accessibilityLabel={`RIR serie ${index + 1}`} value={set.rir} onChange={value => updateSet(week.id, day.id, draft.id, set.id, 'rir', value)} decimal />}
                       </View>
+                      {day.effortMode === 'both' ? <Pressable accessibilityRole="button" accessibilityLabel={set.effortLinked ? 'Desvincular RPE y RIR' : 'Vincular RPE y RIR'} onPress={() => toggleEffortLinked(week.id, day.id, draft.id, set.id)} style={styles.linkButton}>
+                        <Ionicons name={set.effortLinked ? 'link' : 'unlink'} color={set.effortLinked ? colors.orange : colors.dim} size={14} />
+                        <Text style={[styles.linkText, set.effortLinked && styles.linkTextActive]}>{set.effortLinked ? 'Vinculados · Desvincular' : 'Separados · Vincular'}</Text>
+                      </Pressable> : null}
                     </Pressable>)}
                     <Pressable accessibilityRole="button" accessibilityLabel={`Agregar serie a ${exercise.name}`} onPress={() => addSet(week.id, day.id, draft.id)} style={styles.addSetButton}>
                       <Ionicons name="add" color={colors.orange} size={16} />
@@ -519,6 +622,8 @@ export function CoachBlockEditorScreen({ athleteId, blockId, onBack, onSaved }: 
               <ExercisePicker
                 selectedIds={day.exercises.map(item => item.exerciseId)}
                 onToggle={exercise => toggleExercise(week.id, day.id, exercise)}
+                onCatalogLoaded={setExerciseCatalog}
+                allowCustomVariants
               />
             </View>)}
 
@@ -610,6 +715,9 @@ const styles = StyleSheet.create({
   draftFields: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   addSetButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed', borderRadius: 10, paddingVertical: 9, marginTop: 4 },
   addSetText: { color: colors.orange, fontWeight: '700', fontSize: 12 },
+  linkButton: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 8 },
+  linkText: { color: colors.dim, fontSize: 10, fontWeight: '700' },
+  linkTextActive: { color: colors.orange },
   addDayButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed', borderRadius: 12, paddingVertical: 12, marginTop: 4 },
   addDayDisabled: { opacity: 0.55 },
   addDayText: { color: colors.orange, fontWeight: '700', fontSize: 13 },

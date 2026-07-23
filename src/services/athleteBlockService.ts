@@ -47,7 +47,7 @@ type RemoteBlockWeekRow = { id: string; block_id: string; week_number: number; n
 type RemoteBlockRoutineRow = { id: string; name: string; training_day: number; block_week_id: string; prescription_notes: string | null };
 type RemoteRoutineRow = { id: string; name: string; training_day: number; effort_mode: string; created_at: string; updated_at: string; block_week_id: string | null; routine_exercises: RemoteRoutineExerciseRow[] | null };
 type RemoteRoutineExerciseRow = { id: string; exercise_id: string; position: number; exercises: { name: string; muscle: string } | { name: string; muscle: string }[] | null; routine_sets: RemoteRoutineSetRow[] | null };
-type RemoteRoutineSetRow = { id: string; position: number; set_type: string; weight: number | string; reps: number; reps_min: number; reps_max: number; rpe: number | string | null; rir: number | string | null };
+type RemoteRoutineSetRow = { id: string; position: number; set_type: string; weight: number | string; reps: number; reps_min: number; reps_max: number; rpe: number | string | null; rir: number | string | null; effort_linked: boolean };
 
 function requireClient() {
   if (!supabase) throw new Error('Supabase aún no está configurado.');
@@ -120,6 +120,7 @@ export async function getBlockWeeks(blockId: string): Promise<AthleteBlockWeek[]
     .from('coach_block_weeks')
     .select('id,block_id,week_number,name,is_warmup,week_type,status,start_date_override,completed_at')
     .eq('block_id', blockId)
+    .eq('is_warmup', false)
     .order('week_number');
   if (error) throw error;
   return ((data ?? []) as RemoteBlockWeekRow[]).map(toWeek);
@@ -163,7 +164,7 @@ export async function getLatestRoutine(routineId: string): Promise<Routine> {
   const client = requireClient();
   const { data, error } = await client
     .from('routines')
-    .select('id,name,training_day,effort_mode,created_at,updated_at,block_week_id,routine_exercises(id,exercise_id,position,exercises(name,muscle),routine_sets(id,position,set_type,weight,reps,reps_min,reps_max,rpe,rir))')
+    .select('id,name,training_day,effort_mode,created_at,updated_at,block_week_id,routine_exercises(id,exercise_id,position,exercises(name,muscle),routine_sets(id,position,set_type,weight,reps,reps_min,reps_max,rpe,rir,effort_linked))')
     .eq('id', routineId)
     .single();
   if (error) throw error;
@@ -191,6 +192,7 @@ export async function getLatestRoutine(routineId: string): Promise<Routine> {
           repsMax: set.reps_max ?? set.reps,
           rpe: set.rpe == null ? undefined : Number(set.rpe),
           rir: set.rir == null ? undefined : Number(set.rir),
+          effortLinked: set.effort_linked,
         })),
       };
     }),

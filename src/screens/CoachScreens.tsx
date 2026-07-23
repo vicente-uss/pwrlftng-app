@@ -57,7 +57,7 @@ export function CoachAthletesScreen({ onBack, onAthlete }: { onBack(): void; onA
   </View>;
 }
 
-export function CoachAthleteDetailScreen({ athleteId, onBack, onNewBlock, onEditBlock }: { athleteId: string; onBack(): void; onNewBlock(): void; onEditBlock(blockId: string): void }) {
+export function CoachAthleteDetailScreen({ athleteId, onBack, onNewBlock, onEditBlock, onActivation }: { athleteId: string; onBack(): void; onNewBlock(): void; onEditBlock(blockId: string): void; onActivation(blockId: string): void }) {
   const [athlete, setAthlete] = useState<CoachAthlete | null>(null);
   const [programs, setPrograms] = useState<CoachProgramBlock[]>([]);
   const [workouts, setWorkouts] = useState<CoachWorkoutSummary[]>([]);
@@ -137,6 +137,7 @@ export function CoachAthleteDetailScreen({ athleteId, onBack, onNewBlock, onEdit
           <Pressable accessibilityRole="button" accessibilityLabel={`${blockOpen ? 'Cerrar' : 'Abrir'} ${block.name}`} onPress={() => toggle(block.id)} style={styles.folderHeader}>
             <View style={styles.folderIcon}><Ionicons name={blockOpen ? 'folder-open-outline' : 'folder-outline'} color={colors.orange} size={20} /></View>
             <View style={styles.grow}><Text style={styles.folderTitle}>{block.name}</Text><Text style={styles.dim}>{block.weeks.length} carpetas · {block.status === 'draft' ? 'Sin fecha / borrador' : block.status === 'archived' ? 'Archivado' : block.status === 'completed' ? 'Completado' : `Semana ${block.currentWeekNumber}`}</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel={`Editar Activación de ${block.name}`} onPress={() => onActivation(block.id)} hitSlop={8} style={styles.iconButton}><Ionicons name="book-outline" color={colors.orange} size={18} /></Pressable>
             <Pressable accessibilityRole="button" accessibilityLabel={`Editar ${block.name}`} onPress={() => onEditBlock(block.id)} hitSlop={8} style={styles.iconButton}><Ionicons name="create-outline" color={colors.text} size={18} /></Pressable>
             {block.status !== 'archived' ? <Pressable accessibilityRole="button" accessibilityLabel={`Archivar ${block.name}`} onPress={() => setArchiveTarget({ entity: 'block', id: block.id, label: block.name })} hitSlop={8} style={styles.iconButton}><Ionicons name="archive-outline" color={colors.danger} size={18} /></Pressable> : null}
           </Pressable>

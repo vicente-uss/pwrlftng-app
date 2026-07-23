@@ -8,11 +8,55 @@ export type CoachRoutineSummary = { id: string; name: string; day: number; effor
 export type CoachWorkoutSummary = { id: string; routineName: string; effortMode: string; date: string; durationSeconds: number; totalVolume: number; setsCompleted: number; exerciseNames: string[] };
 export type CoachComment = { id: string; text: string; createdAt: string; routineId: string | null; workoutId: string | null };
 
-export type BlockDraftSet = { id?: string; weight: number; repsMin: number; repsMax: number; rpe: number | null; rir: number | null };
+export type BlockDraftSet = { id?: string; weight: number; repsMin: number; repsMax: number; rpe: number | null; rir: number | null; effortLinked?: boolean };
 export type BlockDraftExercise = { id?: string; exerciseId: string; sets: BlockDraftSet[] };
 export type BlockDraftDay = { id?: string; name: string; trainingDay: number; effortMode: EffortMode; prescriptionNotes?: string | null; status?: 'draft' | 'published'; exercises: BlockDraftExercise[] };
 export type BlockDraftWeek = { id?: string; name: string; weekNumber: number; isWarmup: boolean; weekType?: ProgramWeekType; status?: ProgramStatus; startDateOverride?: string | null; days: BlockDraftDay[] };
 export type BlockDraftInfo = { id?: string; name: string; goalText: string | null; startDate: string | null; totalWeeks: number; status?: ProgramStatus; currentWeekNumber?: number };
+export type CoachProgramSavePayload = {
+  block: {
+    id: string;
+    name: string;
+    goalText: string | null;
+    startDate: string | null;
+    totalWeeks: number;
+    status: ProgramStatus;
+    currentWeekNumber: number;
+  };
+  weeks: {
+    id: string;
+    name: string;
+    weekNumber: number;
+    isWarmup: boolean;
+    weekType: ProgramWeekType;
+    status: ProgramStatus;
+    startDateOverride: string | null;
+    days: {
+      id: string;
+      name: string;
+      trainingDay: number;
+      effortMode: EffortMode;
+      prescriptionNotes: string | null;
+      status: 'draft' | 'published';
+      exercises: {
+        id: string;
+        exerciseId: string;
+        position: number;
+        sets: {
+          id: string;
+          position: number;
+          setType: 'working';
+          weight: number;
+          repsMin: number;
+          repsMax: number;
+          rpe: number | null;
+          rir: number | null;
+          effortLinked: boolean;
+        }[];
+      }[];
+    }[];
+  }[];
+};
 
 export type CoachProgramDay = CoachRoutineSummary & { blockWeekId: string; status: string; prescriptionNotes: string | null; archivedAt: string | null };
 export type CoachProgramWeek = { id: string; blockId: string; name: string; weekNumber: number; weekType: ProgramWeekType; status: ProgramStatus; startDateOverride: string | null; archivedAt: string | null; days: CoachProgramDay[] };
@@ -144,94 +188,66 @@ export async function addComment(athleteId: string, text: string, routineId?: st
   if (error) throw error;
 }
 
+export function buildCoachProgramSavePayload(info: BlockDraftInfo, weeks: BlockDraftWeek[]): CoachProgramSavePayload {
+  const trainingWeeks = weeks.filter(week => !week.isWarmup);
+  return {
+    block: {
+      id: info.id ?? makeId('block'),
+      name: info.name.trim(),
+      goalText: info.goalText,
+      startDate: info.startDate,
+      totalWeeks: Math.max(1, trainingWeeks.length || info.totalWeeks),
+      status: info.status ?? (info.startDate ? 'published' : 'draft'),
+      currentWeekNumber: info.currentWeekNumber ?? trainingWeeks[0]?.weekNumber ?? 1,
+    },
+    weeks: weeks.map(week => ({
+      id: week.id ?? makeId('block-week'),
+      name: week.name.trim(),
+      weekNumber: week.weekNumber,
+      isWarmup: week.isWarmup,
+      weekType: week.weekType ?? (week.isWarmup ? 'activation' : 'training'),
+      status: week.status ?? 'published',
+      startDateOverride: week.startDateOverride ?? null,
+      days: week.days.map((day, dayIndex) => ({
+        id: day.id ?? makeId('routine'),
+        name: day.name.trim(),
+        trainingDay: dayIndex + 1,
+        effortMode: day.effortMode,
+        prescriptionNotes: day.prescriptionNotes ?? null,
+        status: day.status ?? 'published',
+        exercises: day.exercises.map((exercise, exerciseIndex) => ({
+          id: exercise.id ?? makeId('re'),
+          exerciseId: exercise.exerciseId,
+          position: exerciseIndex,
+          sets: exercise.sets.map((set, setIndex) => ({
+            id: set.id ?? makeId('rs'),
+            position: setIndex,
+            setType: 'working',
+            weight: set.weight,
+            repsMin: set.repsMin,
+            repsMax: set.repsMax,
+            rpe: set.rpe,
+            rir: set.rir,
+            effortLinked: set.effortLinked ?? true,
+          })),
+        })),
+      })),
+    })),
+  };
+}
+
 export async function createAthleteBlock(athleteId: string, info: BlockDraftInfo, weeks: BlockDraftWeek[]) {
   if (!supabase) throw new Error('Supabase aún no está configurado.');
   const populatedWeeks = weeks.filter(week => week.days.length > 0);
   if (!populatedWeeks.length) return;
-  const timestamp = new Date().toISOString();
-  const coachId = await currentUserId();
-
-  const blockId = makeId('block');
-  const blockResult = await supabase.from('coach_blocks').insert({
-    id: blockId,
-    coach_id: coachId,
-    athlete_id: athleteId,
-    name: info.name,
-    goal_text: info.goalText,
-    start_date: info.startDate,
-    total_weeks: info.totalWeeks,
-  });
-  if (blockResult.error) throw blockResult.error;
-
-  const weekPlans = populatedWeeks.map(week => ({ id: makeId('block-week'), week }));
-  const weeksResult = await supabase.from('coach_block_weeks').insert(weekPlans.map(plan => ({
-    id: plan.id,
-    block_id: blockId,
-    week_number: plan.week.weekNumber,
-    name: plan.week.name,
-    is_warmup: plan.week.isWarmup,
-  })));
-  if (weeksResult.error) throw weeksResult.error;
-
-  const routinePlans = weekPlans.flatMap(weekPlan => weekPlan.week.days.map(day => ({
-    id: makeId('routine'),
-    weekId: weekPlan.id,
-    day,
-  })));
-  const routinesResult = await supabase.from('routines').insert(routinePlans.map(plan => ({
-    id: plan.id,
-    user_id: athleteId,
-    block_week_id: plan.weekId,
-    name: plan.day.name,
-    training_day: plan.day.trainingDay,
-    effort_mode: plan.day.effortMode,
-    created_at: timestamp,
-    updated_at: timestamp,
-  })));
-  if (routinesResult.error) throw routinesResult.error;
-
-  const routineExercisePlans = routinePlans.flatMap(plan => plan.day.exercises.map((exercise, position) => ({
-    id: makeId('re'),
-    routineId: plan.id,
-    exercise,
-    position,
-  })));
-
-  if (routineExercisePlans.length) {
-    const result = await supabase.from('routine_exercises').insert(routineExercisePlans.map(plan => ({
-      id: plan.id,
-      user_id: athleteId,
-      routine_id: plan.routineId,
-      exercise_id: plan.exercise.exerciseId,
-      position: plan.position,
-    })));
-    if (result.error) throw result.error;
-  }
-
-  const routineSetRows = routineExercisePlans.flatMap(plan => plan.exercise.sets.map((set, position) => ({
-    id: makeId('rs'),
-    user_id: athleteId,
-    routine_exercise_id: plan.id,
-    position,
-    set_type: 'working',
-    weight: set.weight,
-    reps: set.repsMin,
-    reps_min: set.repsMin,
-    reps_max: set.repsMax,
-    rpe: set.rpe,
-    rir: set.rir,
-  })));
-  if (routineSetRows.length) {
-    const result = await supabase.from('routine_sets').insert(routineSetRows);
-    if (result.error) throw result.error;
-  }
+  return saveAthleteBlock(athleteId, info, populatedWeeks);
 }
 
 type RemoteProgramBlockRow = { id: string; name: string; goal_text: string | null; start_date: string | null; total_weeks: number; current_week_number: number; status: ProgramStatus; created_at: string; archived_at: string | null };
 type RemoteProgramWeekRow = { id: string; block_id: string; name: string; week_number: number; week_type: ProgramWeekType; status: ProgramStatus; start_date_override: string | null; archived_at: string | null; is_warmup: boolean };
 type RemoteProgramDayRow = RemoteRoutineRow & { block_week_id: string; status: string; prescription_notes: string | null; archived_at: string | null; effort_mode: string };
 type RemoteDraftExerciseRow = { id: string; routine_id: string; exercise_id: string; position: number };
-type RemoteDraftSetRow = { id: string; routine_exercise_id: string; position: number; weight: number | string; reps_min: number; reps_max: number; rpe: number | string | null; rir: number | string | null };
+type RemoteDraftSetRow = { id: string; routine_exercise_id: string; position: number; weight: number | string; reps_min: number; reps_max: number; rpe: number | string | null; rir: number | string | null; effort_linked: boolean };
 
 export async function getAthleteProgramTree(athleteId: string): Promise<CoachProgramBlock[]> {
   if (!supabase) throw new Error('Supabase aún no está configurado.');
@@ -309,7 +325,7 @@ export async function getCoachBlockDraft(blockId: string): Promise<{ info: Block
   const exercises = (exercisesResult.data ?? []) as RemoteDraftExerciseRow[];
   const exerciseIds = exercises.map(exercise => exercise.id);
   const setsResult = exerciseIds.length
-    ? await supabase.from('routine_sets').select('id,routine_exercise_id,position,weight,reps_min,reps_max,rpe,rir').in('routine_exercise_id', exerciseIds).order('position')
+    ? await supabase.from('routine_sets').select('id,routine_exercise_id,position,weight,reps_min,reps_max,rpe,rir,effort_linked').in('routine_exercise_id', exerciseIds).order('position')
     : { data: [], error: null };
   if (setsResult.error) throw setsResult.error;
   const sets = (setsResult.data ?? []) as RemoteDraftSetRow[];
@@ -333,7 +349,7 @@ export async function getCoachBlockDraft(blockId: string): Promise<{ info: Block
         exercises: exercises.filter(exercise => exercise.routine_id === day.id).map(exercise => ({
           id: exercise.id,
           exerciseId: exercise.exercise_id,
-          sets: sets.filter(set => set.routine_exercise_id === exercise.id).map(set => ({ id: set.id, weight: Number(set.weight) || 0, repsMin: set.reps_min, repsMax: set.reps_max, rpe: set.rpe == null ? null : Number(set.rpe), rir: set.rir == null ? null : Number(set.rir) })),
+          sets: sets.filter(set => set.routine_exercise_id === exercise.id).map(set => ({ id: set.id, weight: Number(set.weight) || 0, repsMin: set.reps_min, repsMax: set.reps_max, rpe: set.rpe == null ? null : Number(set.rpe), rir: set.rir == null ? null : Number(set.rir), effortLinked: set.effort_linked })),
         })),
       })),
     })),
@@ -342,120 +358,13 @@ export async function getCoachBlockDraft(blockId: string): Promise<{ info: Block
 
 export async function saveAthleteBlock(athleteId: string, info: BlockDraftInfo, weeks: BlockDraftWeek[]) {
   if (!supabase) throw new Error('Supabase aún no está configurado.');
-  const timestamp = new Date().toISOString();
-  const coachId = await currentUserId();
-  const blockId = info.id ?? makeId('block');
-  const status = info.status ?? (info.startDate ? 'published' : 'draft');
-  const trainingWeeks = weeks.filter(week => !week.isWarmup);
-  const blockInsertRow = {
-    id: blockId,
-    coach_id: coachId,
-    athlete_id: athleteId,
-    name: info.name.trim(),
-    goal_text: info.goalText,
-    start_date: info.startDate,
-    total_weeks: Math.max(1, trainingWeeks.length || info.totalWeeks),
-    status,
-    current_week_number: info.currentWeekNumber ?? trainingWeeks[0]?.weekNumber ?? 1,
-    published_at: timestamp,
-  };
-  const blockResult = info.id
-    ? await supabase.from('coach_blocks').update({
-      name: blockInsertRow.name,
-      goal_text: blockInsertRow.goal_text,
-      start_date: blockInsertRow.start_date,
-      total_weeks: blockInsertRow.total_weeks,
-      status: blockInsertRow.status,
-      current_week_number: blockInsertRow.current_week_number,
-      published_at: blockInsertRow.published_at,
-    }).eq('id', blockId)
-    : await supabase.from('coach_blocks').insert(blockInsertRow);
-  if (blockResult.error) throw blockResult.error;
-
-  const existingWeeksResult = await supabase.from('coach_block_weeks').select('id').eq('block_id', blockId).is('archived_at', null);
-  if (existingWeeksResult.error) throw existingWeeksResult.error;
-  const existingWeekIds = ((existingWeeksResult.data ?? []) as { id: string }[]).map(item => item.id);
-  const existingWeekIdSet = new Set(existingWeekIds);
-  const weekPlans = weeks.map(week => ({ id: week.id ?? makeId('block-week'), week }));
-  for (const plan of weekPlans) {
-    const editableWeek = {
-      week_number: plan.week.weekNumber,
-      name: plan.week.name.trim(),
-      is_warmup: plan.week.isWarmup,
-      week_type: plan.week.weekType ?? (plan.week.isWarmup ? 'activation' : 'training'),
-      status: plan.week.status ?? 'published',
-      start_date_override: plan.week.startDateOverride ?? null,
-      published_at: timestamp,
-      archived_at: null,
-    };
-    const result = existingWeekIdSet.has(plan.id)
-      ? await supabase.from('coach_block_weeks').update(editableWeek).eq('id', plan.id)
-      : await supabase.from('coach_block_weeks').insert({ id: plan.id, block_id: blockId, ...editableWeek });
-    if (result.error) throw result.error;
-  }
-
-  const keptWeekIds = new Set(weekPlans.map(plan => plan.id));
-  const removedWeekIds = existingWeekIds.filter(id => !keptWeekIds.has(id));
-  if (removedWeekIds.length) {
-    const routineArchive = await supabase.from('routines').update({ status: 'archived', archived_at: timestamp }).in('block_week_id', removedWeekIds);
-    if (routineArchive.error) throw routineArchive.error;
-    const weekArchive = await supabase.from('coach_block_weeks').update({ status: 'archived', archived_at: timestamp }).in('id', removedWeekIds);
-    if (weekArchive.error) throw weekArchive.error;
-  }
-
-  const allKnownWeekIds = [...new Set([...existingWeekIds, ...weekPlans.map(plan => plan.id)])];
-  const existingRoutinesResult = allKnownWeekIds.length
-    ? await supabase.from('routines').select('id,block_week_id').in('block_week_id', allKnownWeekIds).is('archived_at', null)
-    : { data: [], error: null };
-  if (existingRoutinesResult.error) throw existingRoutinesResult.error;
-  const existingRoutines = (existingRoutinesResult.data ?? []) as { id: string; block_week_id: string }[];
-  const routinePlans = weekPlans.flatMap(weekPlan => weekPlan.week.days.map((day, index) => ({ id: day.id ?? makeId('routine'), weekId: weekPlan.id, day: { ...day, trainingDay: index + 1 } })));
-  if (routinePlans.length) {
-    const result = await supabase.from('routines').upsert(routinePlans.map(plan => ({
-      id: plan.id,
-      user_id: athleteId,
-      block_week_id: plan.weekId,
-      name: plan.day.name.trim(),
-      training_day: plan.day.trainingDay,
-      effort_mode: plan.day.effortMode,
-      prescription_notes: plan.day.prescriptionNotes ?? null,
-      status: plan.day.status ?? 'published',
-      created_at: timestamp,
-      updated_at: timestamp,
-      archived_at: null,
-    })));
-    if (result.error) throw result.error;
-  }
-
-  const keptRoutineIds = new Set(routinePlans.map(plan => plan.id));
-  const removedRoutineIds = existingRoutines.map(item => item.id).filter(id => !keptRoutineIds.has(id));
-  if (removedRoutineIds.length) {
-    const result = await supabase.from('routines').update({ status: 'archived', archived_at: timestamp }).in('id', removedRoutineIds);
-    if (result.error) throw result.error;
-  }
-
-  for (const plan of routinePlans) {
-    const oldExercisesResult = await supabase.from('routine_exercises').select('id').eq('routine_id', plan.id);
-    if (oldExercisesResult.error) throw oldExercisesResult.error;
-    const oldExerciseIds = ((oldExercisesResult.data ?? []) as { id: string }[]).map(item => item.id);
-    if (oldExerciseIds.length) {
-      const setsDelete = await supabase.from('routine_sets').delete().in('routine_exercise_id', oldExerciseIds);
-      if (setsDelete.error) throw setsDelete.error;
-      const exercisesDelete = await supabase.from('routine_exercises').delete().in('id', oldExerciseIds);
-      if (exercisesDelete.error) throw exercisesDelete.error;
-    }
-    const exercisePlans = plan.day.exercises.map((exercise, position) => ({ id: makeId('re'), exercise, position }));
-    if (exercisePlans.length) {
-      const exerciseInsert = await supabase.from('routine_exercises').insert(exercisePlans.map(item => ({ id: item.id, user_id: athleteId, routine_id: plan.id, exercise_id: item.exercise.exerciseId, position: item.position })));
-      if (exerciseInsert.error) throw exerciseInsert.error;
-    }
-    const setRows = exercisePlans.flatMap(item => item.exercise.sets.map((set, position) => ({ id: makeId('rs'), user_id: athleteId, routine_exercise_id: item.id, position, set_type: 'working', weight: set.weight, reps: set.repsMin, reps_min: set.repsMin, reps_max: set.repsMax, rpe: set.rpe, rir: set.rir })));
-    if (setRows.length) {
-      const setInsert = await supabase.from('routine_sets').insert(setRows);
-      if (setInsert.error) throw setInsert.error;
-    }
-  }
-  return blockId;
+  const program = buildCoachProgramSavePayload(info, weeks);
+  const { data, error } = await supabase.rpc('save_coach_program_v3', {
+    p_athlete_id: athleteId,
+    p_program: program,
+  });
+  if (error) throw error;
+  return (data as string | null) ?? program.block.id;
 }
 
 export async function archiveCoachProgram(entity: 'block' | 'week' | 'day', id: string) {

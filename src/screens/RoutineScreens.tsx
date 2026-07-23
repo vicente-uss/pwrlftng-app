@@ -5,19 +5,19 @@ import { Card, ConfirmDialog, PrimaryButton, TopBar } from '@/src/components/ui'
 import { ExercisePicker } from '@/src/components/ExercisePicker';
 import { EXERCISE_CATALOG } from '@/src/data/seed';
 import { EffortMode, Exercise, Routine, RoutineExercise, makeId } from '@/src/domain/types';
-import { EFFORT_MODES, effortModeLabel, formatRepRange, usesRir, usesRpe } from '@/src/domain/training';
+import { EFFORT_MODES, effortModeLabel, formatRepRange, linkedEffortUpdate, usesRir, usesRpe } from '@/src/domain/training';
 import { CreateRoutineSetInput, useAppStore } from '@/src/store/AppStore';
 import { colors } from '@/src/theme';
 
 const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 const shortDays = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
 
-type DraftSet = { id: string; weight: string; repsMin: string; repsMax: string; rpe: string; rir: string };
+type DraftSet = { id: string; weight: string; repsMin: string; repsMax: string; rpe: string; rir: string; effortLinked: boolean };
 type DraftExercise = { exerciseId: string; sets: DraftSet[] };
 type DraftField = 'weight' | 'repsMin' | 'repsMax' | 'rpe' | 'rir';
 
 function blankDraftSet(): DraftSet {
-  return { id: makeId('draft-set'), weight: '', repsMin: '5', repsMax: '5', rpe: '8', rir: '2' };
+  return { id: makeId('draft-set'), weight: '', repsMin: '5', repsMax: '5', rpe: '8', rir: '2', effortLinked: true };
 }
 
 function newDraftExercise(exerciseId: string): DraftExercise {
@@ -34,6 +34,7 @@ function toDraftExercise(exercise: RoutineExercise): DraftExercise {
       repsMax: String(set.repsMax),
       rpe: set.rpe == null ? '' : String(set.rpe),
       rir: set.rir == null ? '' : String(set.rir),
+      effortLinked: set.effortLinked ?? true,
     })),
   };
 }
@@ -115,6 +116,14 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
   const [day, setDay] = useState(editingRoutine?.day ?? 1);
   const [effortMode, setEffortMode] = useState<EffortMode>(editingRoutine?.effortMode ?? 'rpe');
   const [drafts, setDrafts] = useState<DraftExercise[]>(() => editingRoutine ? editingRoutine.exercises.map(toDraftExercise) : []);
+  const [exerciseCatalog, setExerciseCatalog] = useState<Exercise[]>(() => [
+    ...EXERCISE_CATALOG,
+    ...(editingRoutine?.exercises ?? []).filter(exercise => !EXERCISE_CATALOG.some(item => item.id === exercise.exerciseId)).map(exercise => ({
+      id: exercise.exerciseId,
+      name: exercise.name,
+      muscle: exercise.muscle,
+    })),
+  ]);
   const atLimit = !editingRoutine && routines.length >= 7;
   const hasInvalidRange = drafts.some(exercise => exercise.sets.some(set => {
     const minimum = Number(set.repsMin);
@@ -144,6 +153,7 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
         repsMax: last?.repsMax ?? '5',
         rpe: last?.rpe ?? '8',
         rir: last?.rir ?? '2',
+        effortLinked: last?.effortLinked ?? true,
       }],
     };
   }));
@@ -156,7 +166,18 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
 
   const updateSet = (exerciseId: string, setId: string, field: DraftField, value: string) => setDrafts(current => current.map(exercise => exercise.exerciseId !== exerciseId ? exercise : ({
     ...exercise,
-    sets: exercise.sets.map(set => set.id === setId ? { ...set, [field]: value } : set),
+    sets: exercise.sets.map(set => {
+      if (set.id !== setId) return set;
+      const patch = field === 'rpe' || field === 'rir'
+        ? linkedEffortUpdate(field, value, set.effortLinked)
+        : { [field]: value };
+      return { ...set, ...patch };
+    }),
+  })));
+
+  const toggleEffortLinked = (exerciseId: string, setId: string) => setDrafts(current => current.map(exercise => exercise.exerciseId !== exerciseId ? exercise : ({
+    ...exercise,
+    sets: exercise.sets.map(set => set.id === setId ? { ...set, effortLinked: !set.effortLinked } : set),
   })));
 
   const toggleRepsMode = (exerciseId: string, setId: string) => setDrafts(current => current.map(exercise => exercise.exerciseId !== exerciseId ? exercise : ({
@@ -173,6 +194,8 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
     if (disabled) return;
     const exercises = drafts.map(exercise => ({
       exerciseId: exercise.exerciseId,
+      name: exerciseCatalog.find(item => item.id === exercise.exerciseId)?.name,
+      muscle: exerciseCatalog.find(item => item.id === exercise.exerciseId)?.muscle,
       sets: exercise.sets.map((set): CreateRoutineSetInput => ({
         type: 'working',
         weight: Math.max(0, Number(set.weight) || 0),
@@ -180,6 +203,7 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
         repsMax: Math.max(0, Math.round(Number(set.repsMax) || 0)),
         rpe: usesRpe(effortMode) ? optionalNumber(set.rpe) : undefined,
         rir: usesRir(effortMode) ? optionalNumber(set.rir) : undefined,
+        effortLinked: set.effortLinked,
       })),
     }));
     onSaved(editingRoutine ? updateRoutine(editingRoutine.id, { name, day, effortMode, exercises }) : createRoutine({ name, day, effortMode, exercises }));
@@ -199,7 +223,7 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
 
       <Text style={styles.label}>EJERCICIOS Y SERIES</Text>
       {drafts.map(draft => {
-        const exercise = EXERCISE_CATALOG.find(item => item.id === draft.exerciseId);
+        const exercise = exerciseCatalog.find(item => item.id === draft.exerciseId);
         if (!exercise) return null;
         return <View key={draft.exerciseId} style={styles.exerciseSelector}>
           <Pressable
@@ -234,6 +258,10 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
                 {usesRpe(effortMode) && <DraftInput label="RPE @" accessibilityLabel={`RPE serie ${index + 1}`} value={set.rpe} onChange={value => updateSet(draft.exerciseId, set.id, 'rpe', value)} decimal />}
                 {usesRir(effortMode) && <DraftInput label="RIR" accessibilityLabel={`RIR serie ${index + 1}`} value={set.rir} onChange={value => updateSet(draft.exerciseId, set.id, 'rir', value)} decimal />}
               </View>
+              {effortMode === 'both' ? <Pressable accessibilityRole="button" accessibilityLabel={set.effortLinked ? 'Desvincular RPE y RIR' : 'Vincular RPE y RIR'} onPress={() => toggleEffortLinked(draft.exerciseId, set.id)} style={styles.linkButton}>
+                <Ionicons name={set.effortLinked ? 'link' : 'unlink'} color={set.effortLinked ? colors.orange : colors.dim} size={14} />
+                <Text style={[styles.linkText, set.effortLinked && styles.linkTextActive]}>{set.effortLinked ? 'Vinculados · Desvincular' : 'Separados · Vincular'}</Text>
+              </Pressable> : null}
             </Pressable>)}
             <Pressable accessibilityRole="button" accessibilityLabel={`Agregar serie a ${exercise.name}`} onPress={() => addSet(draft.exerciseId)} style={styles.addSetButton}>
               <Ionicons name="add" color={colors.orange} size={16} />
@@ -242,7 +270,7 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
           </View>
         </View>;
       })}
-      <ExercisePicker selectedIds={drafts.map(draft => draft.exerciseId)} onToggle={toggleExercise} />
+      <ExercisePicker selectedIds={drafts.map(draft => draft.exerciseId)} onToggle={toggleExercise} onCatalogLoaded={setExerciseCatalog} />
       {hasInvalidRange && <Text style={styles.warning}>El máximo de repeticiones debe ser igual o mayor que el mínimo.</Text>}
       {hasInvalidEffort && <Text style={styles.warning}>RPE debe estar entre 1 y 10; RIR debe estar entre 0 y 10.</Text>}
       {atLimit && <Text style={styles.warning}>Ya tienes el máximo de 7 rutinas activas. Elimina una para crear otra.</Text>}
@@ -296,6 +324,7 @@ const styles = StyleSheet.create({
   exerciseSelector: { gap: 0 }, exerciseRow: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, exerciseActive: { borderColor: colors.orange, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   setEditor: { borderWidth: 1, borderTopWidth: 0, borderColor: colors.orange, borderBottomLeftRadius: 12, borderBottomRightRadius: 12, padding: 12, gap: 10, backgroundColor: '#0f0f0f' }, editorHint: { color: colors.dim, fontSize: 11, lineHeight: 16 }, draftSet: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 7 }, setTitle: { color: colors.orange, fontSize: 9, fontWeight: '800', letterSpacing: 1.3 }, draftFields: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, draftField: { width: 72, gap: 4 }, draftLabel: { color: colors.dim, fontSize: 8, height: 20 }, draftInput: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingVertical: 9, paddingHorizontal: 6, color: colors.text, textAlign: 'center', fontFamily: 'monospace' },
   addSetButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed', borderRadius: 10, paddingVertical: 9, marginTop: 4 }, addSetText: { color: colors.orange, fontWeight: '700', fontSize: 12 },
+  linkButton: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 8 }, linkText: { color: colors.dim, fontSize: 10, fontWeight: '700' }, linkTextActive: { color: colors.orange },
   repsRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 3 }, repsRangeInput: { flex: 1, paddingHorizontal: 2 }, repsDash: { color: colors.dim, fontSize: 12, fontWeight: '700' },
   save: { color: colors.orange, fontWeight: '700' }, disabled: { color: colors.subtle }, warning: { color: colors.warning, fontSize: 12 }, cta: { paddingHorizontal: 20, paddingBottom: 8 }, exerciseBlock: { gap: 8 }, rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },

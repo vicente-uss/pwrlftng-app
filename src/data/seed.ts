@@ -1,17 +1,17 @@
 import { Exercise, PersistedData, Routine, RoutineExercise, RoutineSet } from '@/src/domain/types';
 
 export const EXERCISE_CATALOG: Exercise[] = [
-  { id: 'squat', name: 'Squat', muscle: 'Piernas' },
-  { id: 'bench', name: 'Bench Press', muscle: 'Pecho' },
-  { id: 'deadlift', name: 'Deadlift', muscle: 'Espalda' },
-  { id: 'ohp', name: 'Overhead Press', muscle: 'Hombros' },
+  { id: 'squat', name: 'Squat', muscle: 'Piernas', isSystem: true, movementFamily: 'squat', category: 'SBD' },
+  { id: 'bench', name: 'Bench Press', muscle: 'Pecho', isSystem: true, movementFamily: 'bench', category: 'SBD' },
+  { id: 'deadlift', name: 'Deadlift', muscle: 'Espalda', isSystem: true, movementFamily: 'deadlift', category: 'SBD' },
+  { id: 'ohp', name: 'Overhead Press', muscle: 'Hombros', isSystem: true, movementFamily: 'other', category: 'Hombros' },
   { id: 'curl', name: 'Curl con barra', muscle: 'Bíceps' },
   { id: 'pushdown', name: 'Tricep Pushdown', muscle: 'Tríceps' },
   // Se conservan para mostrar rutinas e historiales creados antes de Prioridad 2.
-  { id: 'row', name: 'Remo con barra', muscle: 'Espalda' },
-  { id: 'rdl', name: 'Romanian Deadlift', muscle: 'Piernas' },
-  { id: 'pulldown', name: 'Lat Pulldown', muscle: 'Espalda' },
-  { id: 'leg-curl', name: 'Leg Curl', muscle: 'Piernas' },
+  { id: 'row', name: 'Remo con barra', muscle: 'Espalda', isSystem: true, movementFamily: 'other', category: 'Espalda' },
+  { id: 'rdl', name: 'Romanian Deadlift', muscle: 'Piernas', isSystem: true, movementFamily: 'deadlift', parentExerciseId: 'deadlift', category: 'SBD' },
+  { id: 'pulldown', name: 'Lat Pulldown', muscle: 'Espalda', isSystem: true, movementFamily: 'other', category: 'Espalda' },
+  { id: 'leg-curl', name: 'Leg Curl', muscle: 'Piernas', isSystem: true, movementFamily: 'other', category: 'Piernas' },
 ];
 
 const ACTIVE_EXERCISE_IDS = new Set(['squat', 'bench', 'deadlift', 'ohp', 'curl', 'pushdown']);

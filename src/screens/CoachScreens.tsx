@@ -24,7 +24,13 @@ export function CoachAthletesScreen({ onBack, onAthlete }: { onBack(): void; onA
     let active = true;
     getMyAthletes()
       .then(list => { if (active) setAthletes(list); })
-      .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No pudimos cargar tus atletas.'); })
+      .catch(cause => {
+        console.error('coach athletes load error', cause);
+        if (active) {
+          const remote = cause as { message?: string; error_description?: string } | null;
+          setError(remote?.message ?? remote?.error_description ?? 'No pudimos cargar tus atletas.');
+        }
+      })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
@@ -71,7 +77,11 @@ export function CoachAthleteDetailScreen({ athleteId, onBack, onNewBlock }: { at
         setWorkouts(workoutList);
         setComments(commentList);
       })
-      .catch(cause => setError(cause instanceof Error ? cause.message : 'No pudimos cargar la información del atleta.'))
+      .catch(cause => {
+        console.error('coach athlete load error', cause);
+        const remote = cause as { message?: string; error_description?: string } | null;
+        setError(remote?.message ?? remote?.error_description ?? 'No pudimos cargar la información del atleta.');
+      })
       .finally(() => setLoading(false));
   }, [athleteId]);
 

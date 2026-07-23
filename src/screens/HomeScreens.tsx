@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -8,6 +8,7 @@ import { Routine } from '@/src/domain/types';
 import { effortModeLabel } from '@/src/domain/training';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
 import { signInWithEmail, signUpWithEmail } from '@/src/services/authService';
+import { AthleteBlock, AthleteBlockRoutine, AthleteBlockWeek, getBlockRoutines, getBlockWeeks, getMyActiveBlock } from '@/src/services/athleteBlockService';
 import { generateInviteCode, redeemCoachCode } from '@/src/services/coachService';
 import { useAppStore } from '@/src/store/AppStore';
 import { colors, condensed, shortDays } from '@/src/theme';
@@ -169,32 +170,98 @@ export function AccountTypeScreen({ onDone }: { onDone(): void }) {
 
 export function TrainingScreen({ onCreate, onRoutine, onHistory, onStart }: { onCreate(): void; onRoutine(routine: Routine): void; onHistory(): void; onStart(routineId?: string): void }) {
   const { routines, history } = useAppStore();
+  const [block, setBlock] = useState<AthleteBlock | null>(null);
+  const [blockWeeks, setBlockWeeks] = useState<AthleteBlockWeek[]>([]);
+  const [blockRoutines, setBlockRoutines] = useState<AthleteBlockRoutine[]>([]);
+  const [blockLoading, setBlockLoading] = useState(isSupabaseConfigured);
+  const [blockFailed, setBlockFailed] = useState(false);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let active = true;
+    (async () => {
+      try {
+        const found = await getMyActiveBlock();
+        if (!active) return;
+        if (!found) { setBlock(null); return; }
+        const [weeks, weekRoutines] = await Promise.all([getBlockWeeks(found.id), getBlockRoutines(found.id)]);
+        if (!active) return;
+        setBlock(found);
+        setBlockWeeks(weeks);
+        setBlockRoutines(weekRoutines);
+      } catch (cause) {
+        console.error('athlete block load error', cause);
+        if (active) setBlockFailed(true);
+      } finally {
+        if (active) setBlockLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const localRoutines = routines.filter(routine => !routine.blockWeekId);
+  const showBlock = block !== null && !blockFailed;
+  const weeksToRender = showBlock
+    ? blockWeeks.filter(week => !week.isWarmup || blockRoutines.some(routine => routine.blockWeekId === week.id))
+    : [];
+
   return <View style={styles.fill}>
     <View style={styles.header}><Brand compact /></View>
     <ScrollView contentContainerStyle={styles.content}>
-      <Card style={styles.freeCard}>
-        <View style={styles.freeIcon}><Ionicons name="flash-outline" color={colors.orange} size={21} /></View>
-        <Text style={styles.cardTitle}>Empezar entrenamiento libre</Text>
-        <Text style={styles.dim}>Registra una sesión sin guardar una rutina nueva.</Text>
-        <PrimaryButton title="Empezar entrenamiento libre" onPress={() => onStart()} />
-      </Card>
+      {blockLoading ? <Text style={styles.dim}>Cargando tu bloque…</Text> : null}
 
-      <PrimaryButton title="Nueva rutina" light onPress={onCreate} />
+      {showBlock && block ? <>
+        <Card>
+          <Text style={styles.cardTitle}>{block.name}</Text>
+          {block.goalText ? <Text style={styles.dim}>{block.goalText}</Text> : null}
+        </Card>
+        {weeksToRender.map(week => {
+          const daysInWeek = blockRoutines
+            .filter(routine => routine.blockWeekId === week.id)
+            .slice()
+            .sort((a, b) => a.trainingDay - b.trainingDay);
+          return <View key={week.id} style={styles.blockWeekSection}>
+            <Text style={styles.section}>{week.name.toUpperCase()}</Text>
+            {daysInWeek.length === 0 ? <Card><Text style={styles.dim}>Sin días asignados.</Text></Card> : null}
+            {daysInWeek.map(routine => {
+              const dayLabel = routine.name.startsWith(`${block.name} · `)
+                ? routine.name.slice(block.name.length + 3)
+                : routine.name;
+              return <Card key={routine.id}>
+                <View style={styles.routineHead}>
+                  <View style={styles.dayBox}><Text style={styles.day}>D{routine.trainingDay}</Text><Ionicons name="barbell-outline" color={colors.dim} size={16} /></View>
+                  <View style={styles.grow}><Text style={styles.routineName}>{dayLabel}</Text></View>
+                </View>
+                <PrimaryButton title="Empezar" onPress={() => onStart(routine.id)} />
+              </Card>;
+            })}
+          </View>;
+        })}
+      </> : (!blockLoading ? <>
+        <Card style={styles.freeCard}>
+          <View style={styles.freeIcon}><Ionicons name="flash-outline" color={colors.orange} size={21} /></View>
+          <Text style={styles.cardTitle}>Empezar entrenamiento libre</Text>
+          <Text style={styles.dim}>Registra una sesión sin guardar una rutina nueva.</Text>
+          <PrimaryButton title="Empezar entrenamiento libre" onPress={() => onStart()} />
+        </Card>
 
-      <View style={styles.sectionHead}><Text style={styles.section}>MIS RUTINAS</Text><Text style={styles.count}>{routines.length}/7</Text></View>
-      {routines.map(routine => <Card key={routine.id}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Abrir rutina ${routine.name}`} onPress={() => onRoutine(routine)} style={styles.routineHead}>
-          <View style={styles.dayBox}><Text style={styles.day}>{shortDays[routine.day - 1]}</Text><Ionicons name="barbell-outline" color={colors.dim} size={16} /></View>
-          <View style={styles.grow}>
-            <Text style={styles.routineName}>{routine.name}</Text>
-            <Text style={styles.dim}>{routine.exercises.length} ejercicios · {routine.exercises.reduce((sum, item) => sum + item.sets.length, 0)} series · {effortModeLabel(routine.effortMode)}</Text>
-          </View>
-          <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
-        </Pressable>
-        <PrimaryButton title="Iniciar rutina" onPress={() => onStart(routine.id)} />
-      </Card>)}
+        <PrimaryButton title="Nueva rutina" light onPress={onCreate} />
 
-      {routines.length === 0 ? <Card><Text style={styles.muted}>Aún no tienes rutinas.</Text><PrimaryButton title="Crear primera rutina" onPress={onCreate} /></Card> : null}
+        <View style={styles.sectionHead}><Text style={styles.section}>MIS RUTINAS</Text><Text style={styles.count}>{localRoutines.length}/7</Text></View>
+        {localRoutines.map(routine => <Card key={routine.id}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Abrir rutina ${routine.name}`} onPress={() => onRoutine(routine)} style={styles.routineHead}>
+            <View style={styles.dayBox}><Text style={styles.day}>{shortDays[routine.day - 1]}</Text><Ionicons name="barbell-outline" color={colors.dim} size={16} /></View>
+            <View style={styles.grow}>
+              <Text style={styles.routineName}>{routine.name}</Text>
+              <Text style={styles.dim}>{routine.exercises.length} ejercicios · {routine.exercises.reduce((sum, item) => sum + item.sets.length, 0)} series · {effortModeLabel(routine.effortMode)}</Text>
+            </View>
+            <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+          </Pressable>
+          <PrimaryButton title="Iniciar rutina" onPress={() => onStart(routine.id)} />
+        </Card>)}
+
+        {localRoutines.length === 0 ? <Card><Text style={styles.muted}>Aún no tienes rutinas.</Text><PrimaryButton title="Crear primera rutina" onPress={onCreate} /></Card> : null}
+      </> : null)}
 
       <Pressable accessibilityRole="button" accessibilityLabel="Sesiones anteriores" onPress={onHistory} style={styles.historyButton}>
         <View style={styles.historyIcon}><Ionicons name="time-outline" color={colors.orange} size={19} /></View>
@@ -227,6 +294,7 @@ const styles = StyleSheet.create({
   dim: { color: colors.dim, fontSize: 12, lineHeight: 17 },
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   section: { color: colors.dim, fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  blockWeekSection: { gap: 10, marginTop: 8 },
   count: { color: colors.subtle, fontSize: 10 },
   routineHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dayBox: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center', gap: 3 },

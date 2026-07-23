@@ -238,6 +238,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       exercises,
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp,
+      blockWeekId: existing?.blockWeekId ?? null,
     };
     setData(current => ({ ...current, routines: current.routines.map(item => item.id === id ? routine : item) }));
     return routine;

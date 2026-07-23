@@ -9,7 +9,7 @@ export type PushResult = 'no-session' | 'pull-required' | 'synced';
 
 type RemoteProfile = { display_name: string | null; body_weight: number | string | null; height_cm: number | null; goal: string; level: string; default_rest_seconds: number; updated_at: string };
 type RemoteExercise = { id: string; name: string; muscle: string };
-type RemoteRoutine = { id: string; name: string; training_day: number; effort_mode: string; created_at: string; updated_at: string };
+type RemoteRoutine = { id: string; name: string; training_day: number; effort_mode: string; created_at: string; updated_at: string; block_week_id: string | null };
 type RemoteRoutineExercise = { id: string; routine_id: string; exercise_id: string; position: number };
 type RemoteRoutineSet = { id: string; routine_exercise_id: string; position: number; set_type: string; weight: number | string; reps: number; reps_min: number | null; reps_max: number | null; rpe: number | string | null; rir: number | string | null };
 type RemoteWorkout = { id: string; routine_name: string; effort_mode: string; notes: string | null; completed_at: string; duration_seconds: number; total_volume: number | string; sets_completed: number };
@@ -46,7 +46,7 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
   const [profileResult, exercisesResult, routinesResult, routineExercisesResult, routineSetsResult, workoutsResult, workoutExercisesResult, workoutSetsResult, tombstonesResult] = await Promise.all([
     supabase.from('profiles').select('display_name,body_weight,height_cm,goal,level,default_rest_seconds,updated_at').eq('id', userId).maybeSingle(),
     supabase.from('exercises').select('id,name,muscle'),
-    supabase.from('routines').select('id,name,training_day,effort_mode,created_at,updated_at').eq('user_id', userId).order('training_day'),
+    supabase.from('routines').select('id,name,training_day,effort_mode,created_at,updated_at,block_week_id').eq('user_id', userId).order('training_day'),
     supabase.from('routine_exercises').select('id,routine_id,exercise_id,position').eq('user_id', userId).order('position'),
     supabase.from('routine_sets').select('id,routine_exercise_id,position,set_type,weight,reps,reps_min,reps_max,rpe,rir').eq('user_id', userId).order('position'),
     supabase.from('workouts').select('id,routine_name,effort_mode,notes,completed_at,duration_seconds,total_volume,sets_completed').eq('user_id', userId).order('completed_at', { ascending: false }),
@@ -67,6 +67,7 @@ export async function pullDataFromCloud(localData: PersistedData, options: { inc
     effortMode: effortMode(routine.effort_mode),
     createdAt: routine.created_at,
     updatedAt: routine.updated_at,
+    blockWeekId: routine.block_week_id,
     exercises: routineExerciseRows.filter(item => item.routine_id === routine.id).sort((a, b) => a.position - b.position).map((item): RoutineExercise => {
       const exercise = exerciseMap.get(item.exercise_id);
       return {
@@ -174,7 +175,7 @@ export async function syncDataToCloud(data: PersistedData): Promise<PushResult> 
   ensure(profileResult.error);
 
   if (liveRoutines.length) {
-    const routinesResult = await supabase.from('routines').upsert(liveRoutines.map(routine => ({ id: routine.id, user_id: userId, name: routine.name, training_day: routine.day, effort_mode: routine.effortMode, created_at: routine.createdAt, updated_at: routine.updatedAt })));
+    const routinesResult = await supabase.from('routines').upsert(liveRoutines.map(routine => ({ id: routine.id, user_id: userId, name: routine.name, training_day: routine.day, effort_mode: routine.effortMode, created_at: routine.createdAt, updated_at: routine.updatedAt, block_week_id: routine.blockWeekId ?? null })));
     ensure(routinesResult.error);
     const routineExercises = liveRoutines.flatMap(routine => routine.exercises.map((exercise, position) => ({ id: exercise.id, user_id: userId, routine_id: routine.id, exercise_id: exercise.exerciseId, position })));
     if (routineExercises.length) { const result = await supabase.from('routine_exercises').upsert(routineExercises); ensure(result.error); }

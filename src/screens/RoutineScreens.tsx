@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, ConfirmDialog, PrimaryButton, TopBar } from '@/src/components/ui';
+import { ExercisePicker } from '@/src/components/ExercisePicker';
+import { EXERCISE_CATALOG } from '@/src/data/seed';
 import { EffortMode, Exercise, Routine, RoutineExercise, makeId } from '@/src/domain/types';
 import { EFFORT_MODES, effortModeLabel, formatRepRange, usesRir, usesRpe } from '@/src/domain/training';
 import { CreateRoutineSetInput, useAppStore } from '@/src/store/AppStore';
@@ -14,11 +16,12 @@ type DraftSet = { id: string; weight: string; repsMin: string; repsMax: string; 
 type DraftExercise = { exerciseId: string; sets: DraftSet[] };
 type DraftField = 'weight' | 'repsMin' | 'repsMax' | 'rpe' | 'rir';
 
+function blankDraftSet(): DraftSet {
+  return { id: makeId('draft-set'), weight: '', repsMin: '5', repsMax: '5', rpe: '8', rir: '2' };
+}
+
 function newDraftExercise(exerciseId: string): DraftExercise {
-  return {
-    exerciseId,
-    sets: [1, 2, 3].map(() => ({ id: makeId('draft-set'), weight: '0', repsMin: '5', repsMax: '5', rpe: '8', rir: '2' })),
-  };
+  return { exerciseId, sets: [blankDraftSet()] };
 }
 
 function toDraftExercise(exercise: RoutineExercise): DraftExercise {
@@ -47,14 +50,23 @@ function validOptionalEffort(value: string, minimum: number) {
   return Number.isFinite(parsed) && parsed >= minimum && parsed <= 10;
 }
 
-export function DraftInput({ label, value, onChange, decimal = false }: { label: string; value: string; onChange(value: string): void; decimal?: boolean }) {
+export function DraftInput({ label, value, onChange, decimal = false, placeholder, accessibilityLabel }: {
+  label: string;
+  value: string;
+  onChange(value: string): void;
+  decimal?: boolean;
+  placeholder?: string;
+  accessibilityLabel?: string;
+}) {
   return <View style={styles.draftField}>
     <Text style={styles.draftLabel}>{label}</Text>
     <TextInput
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel ?? label}
       value={value}
       onChangeText={onChange}
       selectTextOnFocus
+      placeholder={placeholder}
+      placeholderTextColor={colors.subtle}
       keyboardType={decimal ? 'decimal-pad' : 'number-pad'}
       style={styles.draftInput}
     />
@@ -98,7 +110,7 @@ export function RoutinesScreen({ onCreate, onRoutine }: { onCreate(): void; onRo
 }
 
 export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBack(): void; onSaved(routine: Routine): void; editingRoutine?: Routine }) {
-  const { exercises, routines, createRoutine, updateRoutine } = useAppStore();
+  const { routines, createRoutine, updateRoutine } = useAppStore();
   const [name, setName] = useState(editingRoutine?.name ?? '');
   const [day, setDay] = useState(editingRoutine?.day ?? 1);
   const [effortMode, setEffortMode] = useState<EffortMode>(editingRoutine?.effortMode ?? 'rpe');
@@ -117,6 +129,30 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
   const toggleExercise = (exercise: Exercise) => setDrafts(current => current.some(item => item.exerciseId === exercise.id)
     ? current.filter(item => item.exerciseId !== exercise.id)
     : [...current, newDraftExercise(exercise.id)]);
+
+  const removeExercise = (exerciseId: string) => setDrafts(current => current.filter(item => item.exerciseId !== exerciseId));
+
+  const addSet = (exerciseId: string) => setDrafts(current => current.map(exercise => {
+    if (exercise.exerciseId !== exerciseId) return exercise;
+    const last = exercise.sets.at(-1);
+    return {
+      ...exercise,
+      sets: [...exercise.sets, {
+        id: makeId('draft-set'),
+        weight: last?.weight ?? '',
+        repsMin: last?.repsMin ?? '5',
+        repsMax: last?.repsMax ?? '5',
+        rpe: last?.rpe ?? '8',
+        rir: last?.rir ?? '2',
+      }],
+    };
+  }));
+
+  const removeSet = (exerciseId: string, setId: string) => setDrafts(current => current.map(exercise => {
+    if (exercise.exerciseId !== exerciseId) return exercise;
+    if (exercise.sets.length <= 1) return exercise;
+    return { ...exercise, sets: exercise.sets.filter(set => set.id !== setId) };
+  }));
 
   const updateSet = (exerciseId: string, setId: string, field: DraftField, value: string) => setDrafts(current => current.map(exercise => exercise.exerciseId !== exerciseId ? exercise : ({
     ...exercise,
@@ -162,34 +198,51 @@ export function CreateRoutineScreen({ onBack, onSaved, editingRoutine }: { onBac
       <View style={styles.effortGrid}>{EFFORT_MODES.map(option => <Pressable accessibilityRole="button" accessibilityLabel={option.label} accessibilityState={{ selected: effortMode === option.value }} key={option.value} onPress={() => setEffortMode(option.value)} style={[styles.effortOption, effortMode === option.value && styles.effortOptionActive]}><Text style={[styles.effortTitle, effortMode === option.value && styles.chipTextActive]}>{option.label}</Text><Text style={styles.effortDescription}>{option.description}</Text></Pressable>)}</View>
 
       <Text style={styles.label}>EJERCICIOS Y SERIES</Text>
-      {exercises.map(exercise => {
-        const draft = drafts.find(item => item.exerciseId === exercise.id);
-        return <View key={exercise.id} style={styles.exerciseSelector}>
-          <Pressable accessibilityRole="checkbox" accessibilityLabel={exercise.name} accessibilityState={{ checked: Boolean(draft) }} onPress={() => toggleExercise(exercise)} style={[styles.exerciseRow, draft && styles.exerciseActive]}>
+      {drafts.map(draft => {
+        const exercise = EXERCISE_CATALOG.find(item => item.id === draft.exerciseId);
+        if (!exercise) return null;
+        return <View key={draft.exerciseId} style={styles.exerciseSelector}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Mantén presionado para quitar ${exercise.name}`}
+            onLongPress={() => removeExercise(draft.exerciseId)}
+            style={[styles.exerciseRow, styles.exerciseActive]}
+          >
             <View><Text style={styles.strong}>{exercise.name}</Text><Text style={styles.dim}>{exercise.muscle}</Text></View>
-            <Ionicons name={draft ? 'checkmark' : 'add'} color={draft ? colors.orange : colors.dim} size={18} />
+            <Ionicons name="ellipsis-vertical" color={colors.dim} size={18} />
           </Pressable>
-          {draft && <View style={styles.setEditor}>
-            <Text style={styles.editorHint}>Toca “REPS” para alternar entre reps fijas y un rango (ej. 5–7).</Text>
-            {draft.sets.map((set, index) => <View key={set.id} style={styles.draftSet}>
+          <View style={styles.setEditor}>
+            <Text style={styles.editorHint}>Toca “REPS” para alternar entre reps fijas y un rango (ej. 5–7). Mantén presionada una serie para eliminarla.</Text>
+            {draft.sets.map((set, index) => <Pressable
+              key={set.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Mantén presionado para eliminar serie ${index + 1}`}
+              onLongPress={() => removeSet(draft.exerciseId, set.id)}
+              style={styles.draftSet}
+            >
               <Text style={styles.setTitle}>SERIE {index + 1}</Text>
               <View style={styles.draftFields}>
-                <DraftInput label={`Peso serie ${index + 1}`} value={set.weight} onChange={value => updateSet(exercise.id, set.id, 'weight', value)} decimal />
+                <DraftInput label="PESO" accessibilityLabel={`Peso serie ${index + 1}`} placeholder="-" value={set.weight} onChange={value => updateSet(draft.exerciseId, set.id, 'weight', value)} decimal />
                 <RepsControl
                   index={index}
                   repsMin={set.repsMin}
                   repsMax={set.repsMax}
-                  onChangeMin={value => updateSet(exercise.id, set.id, 'repsMin', value)}
-                  onChangeMax={value => updateSet(exercise.id, set.id, 'repsMax', value)}
-                  onToggleMode={() => toggleRepsMode(exercise.id, set.id)}
+                  onChangeMin={value => updateSet(draft.exerciseId, set.id, 'repsMin', value)}
+                  onChangeMax={value => updateSet(draft.exerciseId, set.id, 'repsMax', value)}
+                  onToggleMode={() => toggleRepsMode(draft.exerciseId, set.id)}
                 />
-                {usesRpe(effortMode) && <DraftInput label={`RPE serie ${index + 1}`} value={set.rpe} onChange={value => updateSet(exercise.id, set.id, 'rpe', value)} decimal />}
-                {usesRir(effortMode) && <DraftInput label={`RIR serie ${index + 1}`} value={set.rir} onChange={value => updateSet(exercise.id, set.id, 'rir', value)} decimal />}
+                {usesRpe(effortMode) && <DraftInput label="RPE @" accessibilityLabel={`RPE serie ${index + 1}`} value={set.rpe} onChange={value => updateSet(draft.exerciseId, set.id, 'rpe', value)} decimal />}
+                {usesRir(effortMode) && <DraftInput label="RIR" accessibilityLabel={`RIR serie ${index + 1}`} value={set.rir} onChange={value => updateSet(draft.exerciseId, set.id, 'rir', value)} decimal />}
               </View>
-            </View>)}
-          </View>}
+            </Pressable>)}
+            <Pressable accessibilityRole="button" accessibilityLabel={`Agregar serie a ${exercise.name}`} onPress={() => addSet(draft.exerciseId)} style={styles.addSetButton}>
+              <Ionicons name="add" color={colors.orange} size={16} />
+              <Text style={styles.addSetText}>Agregar serie</Text>
+            </Pressable>
+          </View>
         </View>;
       })}
+      <ExercisePicker selectedIds={drafts.map(draft => draft.exerciseId)} onToggle={toggleExercise} />
       {hasInvalidRange && <Text style={styles.warning}>El máximo de repeticiones debe ser igual o mayor que el mínimo.</Text>}
       {hasInvalidEffort && <Text style={styles.warning}>RPE debe estar entre 1 y 10; RIR debe estar entre 0 y 10.</Text>}
       {atLimit && <Text style={styles.warning}>Ya tienes el máximo de 7 rutinas activas. Elimina una para crear otra.</Text>}
@@ -242,6 +295,7 @@ const styles = StyleSheet.create({
   effortGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, effortOption: { width: '48%', minHeight: 68, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, gap: 4 }, effortOptionActive: { borderColor: colors.orange, backgroundColor: '#21130d' }, effortTitle: { color: colors.muted, fontWeight: '800' }, effortDescription: { color: colors.dim, fontSize: 10, lineHeight: 14 },
   exerciseSelector: { gap: 0 }, exerciseRow: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, exerciseActive: { borderColor: colors.orange, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   setEditor: { borderWidth: 1, borderTopWidth: 0, borderColor: colors.orange, borderBottomLeftRadius: 12, borderBottomRightRadius: 12, padding: 12, gap: 10, backgroundColor: '#0f0f0f' }, editorHint: { color: colors.dim, fontSize: 11, lineHeight: 16 }, draftSet: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 7 }, setTitle: { color: colors.orange, fontSize: 9, fontWeight: '800', letterSpacing: 1.3 }, draftFields: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, draftField: { width: 72, gap: 4 }, draftLabel: { color: colors.dim, fontSize: 8, height: 20 }, draftInput: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingVertical: 9, paddingHorizontal: 6, color: colors.text, textAlign: 'center', fontFamily: 'monospace' },
+  addSetButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed', borderRadius: 10, paddingVertical: 9, marginTop: 4 }, addSetText: { color: colors.orange, fontWeight: '700', fontSize: 12 },
   repsRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 3 }, repsRangeInput: { flex: 1, paddingHorizontal: 2 }, repsDash: { color: colors.dim, fontSize: 12, fontWeight: '700' },
   save: { color: colors.orange, fontWeight: '700' }, disabled: { color: colors.subtle }, warning: { color: colors.warning, fontSize: 12 }, cta: { paddingHorizontal: 20, paddingBottom: 8 }, exerciseBlock: { gap: 8 }, rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },

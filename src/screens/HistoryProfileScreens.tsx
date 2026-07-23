@@ -1,23 +1,40 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, ConfirmDialog, PrimaryButton, TopBar, formatDate } from '@/src/components/ui';
-import { DEFAULT_BLOCK, GOAL_OPTIONS, REST_PRESETS, formatRestDuration, isPresetRest, parseRestDuration } from '@/src/domain/profileOptions';
-import { Profile } from '@/src/domain/types';
+import { DEFAULT_BLOCK, REST_PRESETS, formatRestDuration, isPresetRest, parseRestDuration } from '@/src/domain/profileOptions';
+import { effortModeLabel, usesRir, usesRpe } from '@/src/domain/training';
+import { Profile, WorkoutHistory } from '@/src/domain/types';
+import { useMyRole } from '@/src/hooks/useMyRole';
+import { generateInviteCode, redeemCoachCode } from '@/src/services/coachService';
+import { AthleteProgramTree, getMyProgramTree } from '@/src/services/athleteBlockService';
 import { useAppStore } from '@/src/store/AppStore';
 import { colors, condensed } from '@/src/theme';
 
-export function HistoryScreen() {
+export function HistoryScreen({ onSession, onExercise }: { onSession(session: WorkoutHistory): void; onExercise(exerciseId: string): void }) {
   const { history } = useAppStore();
+  const [programs, setPrograms] = useState<AthleteProgramTree[]>([]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let active = true;
+    getMyProgramTree().then(items => { if (active) setPrograms(items); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  const latestBlockId = programs.find(block => block.status === 'published')?.id ?? programs[0]?.id;
+  const recentHistory = latestBlockId ? history.filter(session => session.blockId === latestBlockId) : history;
+  const toggleFolder = (id: string) => setExpanded(current => ({ ...current, [id]: !current[id] }));
   const records = useMemo(() => {
-    const map = new Map<string, { name: string; max: number; e1rm: number; sessions: number }>();
+    const map = new Map<string, { exerciseId: string; name: string; max: number; e1rm: number; sessions: number }>();
     history.forEach(session => session.exercises.forEach(exercise => {
       const working = exercise.sets.filter(set => set.completed && set.type === 'working');
       if (!working.length) return;
       const max = Math.max(...working.map(set => Number(set.weight) || 0));
       const e1rm = Math.max(...working.map(set => Math.round((Number(set.weight) || 0) * (1 + (Number(set.reps) || 0) / 30))));
       const previous = map.get(exercise.exerciseId);
-      map.set(exercise.exerciseId, { name: exercise.name, max: Math.max(previous?.max ?? 0, max), e1rm: Math.max(previous?.e1rm ?? 0, e1rm), sessions: (previous?.sessions ?? 0) + 1 });
+      map.set(exercise.exerciseId, { exerciseId: exercise.exerciseId, name: exercise.name, max: Math.max(previous?.max ?? 0, max), e1rm: Math.max(previous?.e1rm ?? 0, e1rm), sessions: (previous?.sessions ?? 0) + 1 });
     }));
     return [...map.values()];
   }, [history]);
@@ -25,26 +42,75 @@ export function HistoryScreen() {
   return <View style={styles.fill}>
     <TopBar title="Historial" />
     <ScrollView contentContainerStyle={styles.content}>
-      <Text style={styles.section}>SESIONES RECIENTES</Text>
-      {history.map(session => {
-        const exerciseNotes = session.exercises.filter(exercise => exercise.notes.trim());
-        return <Card key={session.id}>
-          <View style={styles.between}><View style={styles.grow}><Text style={styles.strong}>{session.routineName}</Text><Text style={styles.dim}>{formatDate(session.date)} · {Math.round(session.durationSeconds / 60)} min · {session.setsCompleted} {session.setsCompleted === 1 ? 'serie' : 'series'}</Text></View><Text style={styles.orange}>{session.totalVolume.toLocaleString('es-CL')}kg</Text></View>
-          <Text numberOfLines={1} style={styles.exerciseList}>{session.exercises.map(item => item.name).join(' · ')}</Text>
-          {session.notes ? <View style={styles.note}><Text style={styles.noteLabel}>NOTA DE LA SESIÓN</Text><Text style={styles.noteText}>{session.notes}</Text></View> : null}
-          {exerciseNotes.map(exercise => <View key={exercise.id} style={styles.exerciseNote}><Text style={styles.exerciseNoteName}>{exercise.name}</Text><Text style={styles.noteText}>{exercise.notes}</Text></View>)}
-        </Card>;
+      <Text style={styles.section}>BLOQUES</Text>
+      {programs.map(block => {
+        const open = Boolean(expanded[block.id]);
+        return <View key={block.id} style={styles.historyFolder}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`${open ? 'Cerrar' : 'Abrir'} ${block.name}`} onPress={() => toggleFolder(block.id)} style={styles.historyFolderHeader}><Ionicons name={open ? 'folder-open-outline' : 'folder-outline'} color={colors.orange} size={20} /><View style={styles.grow}><Text style={styles.strong}>{block.name}</Text><Text style={styles.dim}>{block.weeks.length} semanas · {block.status === 'archived' ? 'Archivado' : block.status === 'completed' ? 'Completado' : block.startDate ? 'Planificación' : 'Sin fecha'}</Text></View><Ionicons name={open ? 'chevron-up' : 'chevron-down'} color={colors.dim} size={16} /></Pressable>
+          {open ? <View style={styles.historyFolderBody}>{block.weeks.map(week => {
+            const weekOpen = Boolean(expanded[week.id]);
+            return <View key={week.id} style={styles.historyWeek}><Pressable accessibilityRole="button" accessibilityLabel={`${weekOpen ? 'Cerrar' : 'Abrir'} ${week.name}`} onPress={() => toggleFolder(week.id)} style={styles.historyWeekHeader}><Ionicons name={weekOpen ? 'chevron-down' : 'chevron-forward'} color={colors.dim} size={15} /><View style={styles.grow}><Text style={styles.strong}>{week.name}</Text><Text style={styles.dim}>{week.routines.length} días{week.status === 'completed' ? ' · Completada' : ''}</Text></View></Pressable>{weekOpen ? <View style={styles.historyDays}>{week.routines.map(routine => <View key={routine.id} style={styles.historyDay}><Text style={styles.dayBadge}>D{routine.trainingDay}</Text><Text style={styles.noteText}>{routine.name}</Text></View>)}{!week.routines.length ? <Text style={styles.dim}>Sin días publicados.</Text> : null}</View> : null}</View>;
+          })}</View> : null}
+        </View>;
       })}
-      {history.length === 0 ? <Card><Text style={styles.dim}>Termina tu primer entrenamiento para ver el historial.</Text></Card> : null}
+      {!programs.length ? <Card><Text style={styles.dim}>Tus bloques asignados aparecerán aquí.</Text></Card> : null}
+
+      <Text style={styles.section}>SESIONES RECIENTES</Text>
+      {recentHistory.map(session => {
+        const exerciseNotes = session.exercises.filter(exercise => exercise.notes.trim());
+        return <Pressable accessibilityRole="button" accessibilityLabel={`Ver detalle de ${session.routineName}, ${formatDate(session.date)}`} key={session.id} onPress={() => onSession(session)}>
+          <Card>
+            <View style={styles.between}><View style={styles.grow}><Text style={styles.strong}>{session.routineName}</Text><Text style={styles.dim}>{formatDate(session.date)} · {Math.round(session.durationSeconds / 60)} min · {session.setsCompleted} {session.setsCompleted === 1 ? 'serie' : 'series'}</Text></View><Text style={styles.orange}>{session.totalVolume.toLocaleString('es-CL')}kg</Text></View>
+            {session.athleteModified ? <Text style={styles.modifiedBadge}>MODIFICADO POR EL ATLETA</Text> : null}
+            <Text numberOfLines={1} style={styles.exerciseList}>{session.exercises.map(item => item.name).join(' · ')}</Text>
+            {session.notes ? <View style={styles.note}><Text style={styles.noteLabel}>NOTA DE LA SESIÓN</Text><Text style={styles.noteText}>{session.notes}</Text></View> : null}
+            {exerciseNotes.map(exercise => <View key={exercise.id} style={styles.exerciseNote}><Text style={styles.exerciseNoteName}>{exercise.name}</Text><Text style={styles.noteText}>{exercise.notes}</Text></View>)}
+          </Card>
+        </Pressable>;
+      })}
+      {recentHistory.length === 0 ? <Card><Text style={styles.dim}>Termina tu primer entrenamiento del bloque actual para verlo aquí.</Text></Card> : null}
 
       <Text style={styles.section}>RÉCORDS POR EJERCICIO</Text>
-      {records.map(record => <View key={record.name} style={styles.record}><View style={styles.recordIcon}><Ionicons name="trophy-outline" color={colors.orange} size={17} /></View><View style={styles.grow}><Text style={styles.strong}>{record.name}</Text><Text style={styles.dim}>{record.sessions} {record.sessions === 1 ? 'sesión registrada' : 'sesiones registradas'}</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.max}kg</Text><Text style={styles.metricLabel}>MÁXIMO</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.e1rm}kg</Text><Text style={styles.metricLabel}>E1RM</Text></View></View>)}
+      {records.map(record => <Pressable accessibilityRole="button" accessibilityLabel={`Ver ejercicio ${record.name}`} key={record.exerciseId} onPress={() => onExercise(record.exerciseId)} style={styles.record}><View style={styles.recordIcon}><Ionicons name="trophy-outline" color={colors.orange} size={17} /></View><View style={styles.grow}><Text style={styles.strong}>{record.name}</Text><Text style={styles.dim}>{record.sessions} {record.sessions === 1 ? 'sesión registrada' : 'sesiones registradas'}</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.max}kg</Text><Text style={styles.metricLabel}>MÁXIMO</Text></View><View style={styles.recordMetric}><Text style={styles.metric}>{record.e1rm}kg</Text><Text style={styles.metricLabel}>E1RM</Text></View></Pressable>)}
       {records.length === 0 ? <Text style={styles.emptyHint}>Tus récords aparecerán después de completar series de trabajo.</Text> : null}
     </ScrollView>
   </View>;
 }
 
-export function ProfileScreen({ onSignOut }: { onSignOut(): Promise<void> }) {
+export function SessionDetailScreen({ session, onBack, onExercise }: { session: WorkoutHistory; onBack(): void; onExercise(exerciseId: string): void }) {
+  const showRpe = usesRpe(session.effortMode);
+  const showRir = usesRir(session.effortMode);
+
+  return <View style={styles.fill}>
+    <TopBar title={session.routineName} eyebrow={`${formatDate(session.date)} · ${effortModeLabel(session.effortMode)}`} onBack={onBack} />
+    <ScrollView contentContainerStyle={styles.content}>
+      <View style={styles.between}>
+        <Text style={styles.dim}>{Math.round(session.durationSeconds / 60)} min · {session.setsCompleted} {session.setsCompleted === 1 ? 'serie' : 'series'}</Text>
+        <Text style={styles.orange}>{session.totalVolume.toLocaleString('es-CL')}kg</Text>
+      </View>
+      {session.notes ? <Card><Text style={styles.noteLabel}>NOTA DE LA SESIÓN</Text><Text style={styles.noteText}>{session.notes}</Text></Card> : null}
+      {session.exercises.map(exercise => <View key={exercise.id} style={styles.exerciseBlock}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Ver ejercicio ${exercise.name}`} onPress={() => onExercise(exercise.exerciseId)} style={styles.between}>
+          <View><Text style={styles.strong}>{exercise.name}</Text>{exercise.modificationType && exercise.modificationType !== 'planned' ? <Text style={styles.modifiedBadge}>{exercise.modificationType === 'added' ? 'AGREGADO POR EL ATLETA' : 'MODIFICADO POR EL ATLETA'}</Text> : null}</View>
+          <Text style={styles.dim}>{exercise.muscle}</Text>
+        </Pressable>
+        <Card>
+          <View style={styles.tableHead}><Text style={styles.setNo}>SET</Text><Text style={styles.col}>PESO</Text><Text style={styles.col}>REPS</Text>{showRpe && <Text style={styles.effortCol}>RPE</Text>}{showRir && <Text style={styles.effortCol}>RIR</Text>}</View>
+          {exercise.sets.map((set, index) => <View key={set.id} style={styles.tableRow}>
+            <Text style={[styles.setNo, set.type === 'warmup' && styles.warmup]}>{set.type === 'warmup' ? 'W' : exercise.sets.slice(0, index + 1).filter(item => item.type === 'working').length}</Text>
+            <Text style={styles.colValue}>{set.weight}kg</Text>
+            <Text style={styles.colValue}>{set.reps}</Text>
+            {showRpe && <Text style={styles.effortValue}>{set.rpe || '—'}</Text>}
+            {showRir && <Text style={styles.effortValue}>{set.rir || '—'}</Text>}
+          </View>)}
+        </Card>
+        {exercise.notes ? <Text style={styles.noteText}>{exercise.notes}</Text> : null}
+      </View>)}
+    </ScrollView>
+  </View>;
+}
+
+export function ProfileScreen({ onSignOut, onExercises, onAthletes, onAccountType }: { onSignOut(): Promise<void>; onExercises(): void; onAthletes(): void; onAccountType(): void }) {
   const store = useAppStore();
   const [local, setLocal] = useState<Profile>({ ...store.profile, level: DEFAULT_BLOCK });
   const [customRest, setCustomRest] = useState(isPresetRest(store.profile.defaultRestSeconds) ? '' : formatRestDuration(store.profile.defaultRestSeconds));
@@ -55,6 +121,51 @@ export function ProfileScreen({ onSignOut }: { onSignOut(): Promise<void> }) {
   const [logoutError, setLogoutError] = useState('');
   const parsedCustomRest = parseRestDuration(customRest);
   const restInvalid = customMode && parsedCustomRest === null;
+
+  const { role, error: roleError, refresh: refreshRole } = useMyRole();
+  const [inviteInput, setInviteInput] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const [generateBusy, setGenerateBusy] = useState(false);
+  const [generateError, setGenerateError] = useState('');
+  const [generatedCode, setGeneratedCode] = useState('');
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const linkWithCoach = async () => {
+    const code = inviteInput.trim();
+    if (!code) return;
+    setLinkBusy(true);
+    setLinkError('');
+    try {
+      await redeemCoachCode(code);
+      setInviteInput('');
+      await refreshRole();
+    } catch (cause) {
+      setLinkError(cause instanceof Error ? cause.message : 'No pudimos vincular el código. Inténtalo otra vez.');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  const generateCode = async () => {
+    setGenerateBusy(true);
+    setGenerateError('');
+    setCodeCopied(false);
+    try {
+      setGeneratedCode(await generateInviteCode());
+      await refreshRole();
+    } catch (cause) {
+      setGenerateError(cause instanceof Error ? cause.message : 'No pudimos generar el código. Inténtalo otra vez.');
+    } finally {
+      setGenerateBusy(false);
+    }
+  };
+
+  const copyGeneratedCode = async () => {
+    if (!generatedCode) return;
+    await Clipboard.setStringAsync(generatedCode);
+    setCodeCopied(true);
+  };
 
   const change = (key: keyof Profile, value: string | number) => {
     setSaved(false);
@@ -107,13 +218,10 @@ export function ProfileScreen({ onSignOut }: { onSignOut(): Promise<void> }) {
   return <View style={styles.fill}>
     <TopBar title="Perfil" action={<Ionicons name="settings-outline" color={colors.dim} size={21} />} />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-      <Card><View style={styles.profileHead}><View style={styles.avatar}><Ionicons name="person" color={colors.muted} size={22} /></View><View style={styles.grow}><Text style={styles.profileName}>Atleta PWRLFTNG</Text><Text style={styles.dim}>{DEFAULT_BLOCK} · {local.goal}</Text></View></View><Text style={[styles.sync, store.syncState === 'error' && styles.syncError]}>{syncMessage}</Text></Card>
+      <Card><View style={styles.profileHead}><View style={styles.avatar}><Ionicons name="person" color={colors.muted} size={22} /></View><View style={styles.grow}><TextInput accessibilityLabel="Nombre" value={local.displayName} onChangeText={value => change('displayName', value)} placeholder="Tu nombre" placeholderTextColor={colors.subtle} style={styles.nameInput} /><Text style={styles.dim}>{DEFAULT_BLOCK}</Text></View></View><Text style={[styles.sync, store.syncState === 'error' && styles.syncError]}>{syncMessage}</Text></Card>
 
       <Text style={styles.section}>DATOS DEL ATLETA</Text>
       <View style={styles.metricsRow}><Card style={styles.metricCard}><TextInput accessibilityLabel="Peso corporal en kilogramos" value={local.bodyWeight} onChangeText={value => change('bodyWeight', value)} keyboardType="decimal-pad" style={styles.bigInput} /><Text style={styles.metricLabel}>KG · PESO</Text></Card><Card style={styles.metricCard}><TextInput accessibilityLabel="Altura en centímetros" value={local.height} onChangeText={value => change('height', value)} keyboardType="number-pad" style={styles.bigInput} /><Text style={styles.metricLabel}>CM · ALTURA</Text></Card></View>
-
-      <Text style={styles.section}>OBJETIVO</Text>
-      <View style={styles.optionList}>{GOAL_OPTIONS.map(goal => <Pressable accessibilityRole="radio" accessibilityLabel={goal} accessibilityState={{ selected: local.goal === goal }} key={goal} onPress={() => change('goal', goal)} style={[styles.option, local.goal === goal && styles.optionActive]}><Ionicons name={local.goal === goal ? 'radio-button-on' : 'radio-button-off'} color={local.goal === goal ? colors.orange : colors.dim} size={18} /><Text style={[styles.optionText, local.goal === goal && styles.optionTextActive]}>{goal}</Text></Pressable>)}</View>
 
       <Text style={styles.section}>BLOQUE</Text>
       <View accessibilityState={{ disabled: true }} style={styles.disabledField}><View><Text style={styles.strong}>{DEFAULT_BLOCK}</Text><Text style={styles.dim}>La edición de bloques estará disponible más adelante.</Text></View><Ionicons name="lock-closed-outline" color={colors.subtle} size={17} /></View>
@@ -123,6 +231,55 @@ export function ProfileScreen({ onSignOut }: { onSignOut(): Promise<void> }) {
       {customMode ? <View><TextInput accessibilityLabel="Descanso personalizado en minutos y segundos" value={customRest} onChangeText={changeCustomRest} placeholder="Ej. 2:30" placeholderTextColor={colors.subtle} keyboardType="numbers-and-punctuation" maxLength={5} style={[styles.customInput, restInvalid && styles.inputError]} /><Text style={[styles.helper, restInvalid && styles.warning]}>{restInvalid ? 'Usa el formato MM:SS, con un máximo de 15:00.' : 'Formato minutos:segundos.'}</Text></View> : null}
 
       <PrimaryButton title={saved ? 'Guardado ✓' : 'Guardar cambios'} onPress={save} light disabled={restInvalid} />
+
+      <Text style={styles.section}>BIBLIOTECA</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Ejercicios" onPress={onExercises} style={styles.exercisesButton}>
+        <View style={styles.exercisesIcon}><Ionicons name="barbell-outline" color={colors.orange} size={18} /></View>
+        <View style={styles.grow}><Text style={styles.strong}>Ejercicios</Text><Text style={styles.dim}>Catálogo, video y récords por ejercicio</Text></View>
+        <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+      </Pressable>
+
+      <Text style={styles.section}>COACH</Text>
+      {roleError ? <Text style={styles.warning}>{roleError}</Text> : null}
+
+      {role?.role === 'atleta' && !role.coachId ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Convertirme en coach o vincular con mi coach" onPress={onAccountType} style={styles.exercisesButton}>
+          <View style={styles.exercisesIcon}><Ionicons name="swap-horizontal-outline" color={colors.orange} size={18} /></View>
+          <View style={styles.grow}><Text style={styles.strong}>Convertirme en coach o vincular con mi coach</Text><Text style={styles.dim}>Elige cómo quieres usar PWRLFTNG</Text></View>
+          <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+        </Pressable>
+      ) : role?.role === 'coach' ? (
+        <Card><Text style={styles.strong}>Eres coach</Text><Text style={styles.dim}>Genera códigos y revisa a tus atletas más abajo.</Text></Card>
+      ) : null}
+
+      {role?.coachId ? <Card><Text style={styles.strong}>Vinculado con tu coach</Text></Card> : <View style={styles.coachLinkRow}>
+        <TextInput accessibilityLabel="Código de invitación del coach" value={inviteInput} onChangeText={setInviteInput} placeholder="Código de invitación" placeholderTextColor={colors.subtle} autoCapitalize="characters" style={styles.coachInput} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Vincular con mi coach" disabled={linkBusy || !inviteInput.trim()} onPress={linkWithCoach} style={[styles.coachLinkButton, (linkBusy || !inviteInput.trim()) && styles.coachDisabled]}>
+          <Text style={styles.coachLinkButtonText}>{linkBusy ? 'Vinculando…' : 'Vincular'}</Text>
+        </Pressable>
+      </View>}
+      {linkError ? <Text style={styles.warning}>{linkError}</Text> : null}
+
+      <Pressable accessibilityRole="button" accessibilityLabel="Generar código para un atleta" disabled={generateBusy} onPress={generateCode} style={[styles.exercisesButton, generateBusy && styles.coachDisabled]}>
+        <View style={styles.exercisesIcon}><Ionicons name="qr-code-outline" color={colors.orange} size={18} /></View>
+        <View style={styles.grow}><Text style={styles.strong}>Generar código para un atleta</Text><Text style={styles.dim}>{generateBusy ? 'Generando…' : 'Comparte un código para vincular a un atleta contigo'}</Text></View>
+        <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+      </Pressable>
+      {generateError ? <Text style={styles.warning}>{generateError}</Text> : null}
+      {generatedCode ? <Card style={styles.codeCard}>
+        <Text style={styles.dim}>CÓDIGO GENERADO</Text>
+        <Text style={styles.codeText}>{generatedCode}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Copiar código" onPress={copyGeneratedCode} style={styles.copyButton}>
+          <Ionicons name={codeCopied ? 'checkmark' : 'copy-outline'} color={colors.text} size={16} />
+          <Text style={styles.copyButtonText}>{codeCopied ? 'Copiado' : 'Copiar código'}</Text>
+        </Pressable>
+      </Card> : null}
+
+      {role?.role === 'coach' ? <Pressable accessibilityRole="button" accessibilityLabel="Mis atletas" onPress={onAthletes} style={styles.exercisesButton}>
+        <View style={styles.exercisesIcon}><Ionicons name="people-outline" color={colors.orange} size={18} /></View>
+        <View style={styles.grow}><Text style={styles.strong}>Mis atletas</Text><Text style={styles.dim}>Rutinas, entrenamientos y comentarios de tus atletas</Text></View>
+        <Ionicons name="chevron-forward" color={colors.subtle} size={16} />
+      </Pressable> : null}
 
       <Text style={styles.section}>SESIÓN</Text>
       {logoutError ? <Text accessibilityLiveRegion="polite" style={styles.warning}>{logoutError}</Text> : null}
@@ -138,10 +295,19 @@ const styles = StyleSheet.create({
   grow: { flex: 1 },
   content: { padding: 20, gap: 12, paddingBottom: 42 },
   section: { color: colors.dim, fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginTop: 8 },
+  historyFolder: { borderWidth: 1, borderColor: colors.border, borderRadius: 13, backgroundColor: colors.surface, overflow: 'hidden' },
+  historyFolderHeader: { padding: 13, minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  historyFolderBody: { padding: 9, gap: 7, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  historyWeek: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.background, overflow: 'hidden' },
+  historyWeekHeader: { padding: 10, minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  historyDays: { padding: 8, gap: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  historyDay: { minHeight: 36, paddingHorizontal: 9, borderRadius: 8, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  dayBadge: { color: colors.orange, fontSize: 10, fontWeight: '800', width: 24 },
   between: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
   strong: { color: colors.text, fontWeight: '700' },
   dim: { color: colors.dim, fontSize: 12, marginTop: 3 },
   orange: { color: colors.orange, fontSize: 11, fontWeight: '700' },
+  modifiedBadge: { alignSelf: 'flex-start', color: colors.warning, fontSize: 8, fontWeight: '800', letterSpacing: 0.8, marginTop: 5 },
   exerciseList: { color: colors.subtle, fontSize: 11 },
   note: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 10, gap: 4 },
   noteLabel: { color: colors.orange, fontSize: 8, fontWeight: '800', letterSpacing: 1.2 },
@@ -154,18 +320,24 @@ const styles = StyleSheet.create({
   metric: { color: colors.text, fontSize: 15, fontWeight: '800', fontFamily: 'monospace' },
   metricLabel: { color: colors.dim, fontSize: 8, fontWeight: '700', letterSpacing: 1 },
   emptyHint: { color: colors.subtle, fontSize: 11, lineHeight: 16 },
+  exerciseBlock: { gap: 8 },
+  tableHead: { flexDirection: 'row', paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: colors.border },
+  tableRow: { flexDirection: 'row', paddingVertical: 7 },
+  setNo: { width: 42, color: colors.dim, fontFamily: 'monospace', fontSize: 11 },
+  col: { flex: 1, color: colors.dim, fontFamily: 'monospace', fontSize: 11 },
+  colValue: { flex: 1, color: colors.text, fontFamily: 'monospace', fontSize: 13 },
+  effortCol: { width: 42, color: colors.dim, fontFamily: 'monospace', fontSize: 11 },
+  effortValue: { width: 42, color: colors.text, fontFamily: 'monospace', fontSize: 13 },
+  warmup: { color: colors.warning },
   profileHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 48, height: 48, borderRadius: 14, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' },
-  profileName: { color: colors.text, fontSize: 18, fontWeight: '800', fontFamily: condensed },
   sync: { color: colors.success, fontSize: 10 },
   syncError: { color: colors.warning },
   metricsRow: { flexDirection: 'row', gap: 10 },
   metricCard: { flex: 1 },
   bigInput: { color: colors.text, fontSize: 30, fontWeight: '900', fontFamily: condensed, padding: 0 },
-  optionList: { gap: 8 },
-  option: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  nameInput: { color: colors.text, fontSize: 18, fontWeight: '800', fontFamily: condensed, padding: 0 },
   optionActive: { borderColor: colors.orange, backgroundColor: '#21130d' },
-  optionText: { color: colors.muted, fontWeight: '600' },
   optionTextActive: { color: colors.text },
   disabledField: { opacity: 0.58, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   restGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -177,4 +349,15 @@ const styles = StyleSheet.create({
   warning: { color: colors.warning, fontSize: 12, lineHeight: 17 },
   logoutButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: '#43201f', borderRadius: 13, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
   logoutText: { color: colors.danger, fontWeight: '700' },
+  exercisesButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 13, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  exercisesIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.elevated, alignItems: 'center', justifyContent: 'center' },
+  coachDisabled: { opacity: 0.5 },
+  coachLinkRow: { flexDirection: 'row', gap: 8 },
+  coachInput: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 11, paddingHorizontal: 13, paddingVertical: 12, color: colors.text, fontSize: 14 },
+  coachLinkButton: { backgroundColor: colors.orange, borderRadius: 11, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  coachLinkButtonText: { color: colors.text, fontWeight: '700', fontSize: 13 },
+  codeCard: { alignItems: 'center', gap: 8 },
+  codeText: { color: colors.text, fontSize: 28, fontWeight: '900', fontFamily: 'monospace', letterSpacing: 3 },
+  copyButton: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: colors.elevated, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14 },
+  copyButtonText: { color: colors.text, fontWeight: '700', fontSize: 12 },
 });

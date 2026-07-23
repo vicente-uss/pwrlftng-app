@@ -62,6 +62,7 @@ function normalizeRoutine(value: unknown): Routine {
     }) : [],
     createdAt: text(source.createdAt, new Date().toISOString()),
     updatedAt: text(source.updatedAt, text(source.createdAt, new Date().toISOString())),
+    blockWeekId: typeof source.blockWeekId === 'string' ? source.blockWeekId : null,
   };
 }
 
@@ -113,6 +114,7 @@ function normalizeWorkout(value: unknown): WorkoutHistory {
 function normalizeProfile(value: unknown, migratedAt: string): Profile {
   const source = record(value);
   return {
+    displayName: text(source.displayName),
     bodyWeight: text(source.bodyWeight),
     height: text(source.height),
     goal: normalizeGoal(text(source.goal, 'Ganar fuerza máxima')),

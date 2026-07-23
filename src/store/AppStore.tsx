@@ -1,6 +1,7 @@
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { EXERCISES, SEED_ROUTINE_IDS, freshDefaultData } from '@/src/data/seed';
 import { DEFAULT_BLOCK, GOAL_OPTIONS, MAX_REST_SECONDS } from '@/src/domain/profileOptions';
+import { bestByRepCount, bestRpeAtOrAbove, heaviestWeight, previousSetPerformance } from '@/src/domain/records';
 import { ActiveExercise, ActiveSession, EffortMode, PersistedData, Profile, Routine, RoutineExercise, SetType, WorkoutHistory, makeId } from '@/src/domain/types';
 import { normalizeRepRange } from '@/src/domain/training';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
@@ -17,17 +18,22 @@ export type CreateRoutineInput = {
 
 type SetField = 'weight' | 'reps' | 'rpe' | 'rir';
 export type SyncState = 'local' | 'pulling' | 'syncing' | 'synced' | 'error';
+export type PrEvent = { exerciseName: string; kind: 'weight' | 'reps' | 'rpe' };
 type Store = PersistedData & {
   hydrated: boolean;
   activeSession: ActiveSession | null;
   exercises: typeof EXERCISES;
   syncState: SyncState;
+  lastPrEvent: PrEvent | null;
+  clearPrEvent(): void;
   initializeCloudSync(): Promise<boolean>;
   syncNow(): Promise<boolean>;
   createRoutine(input: CreateRoutineInput): Routine;
+  updateRoutine(id: string, input: CreateRoutineInput): Routine;
   duplicateRoutine(id: string): void;
   deleteRoutine(id: string): void;
   startWorkout(routineId?: string): void;
+  startWorkoutFromRoutine(routine: Routine, context?: { blockId?: string | null; blockWeekId?: string | null }): void;
   addExerciseToActive(exerciseId: string): void;
   updateActiveSet(exerciseId: string, setId: string, field: SetField, value: string): void;
   updateActiveExerciseNotes(exerciseId: string, notes: string): void;
@@ -44,24 +50,31 @@ type Store = PersistedData & {
 
 const Context = createContext<Store | null>(null);
 
-function toActiveExercise(exercise: RoutineExercise): ActiveExercise {
+function toActiveExercise(exercise: RoutineExercise, history: WorkoutHistory[]): ActiveExercise {
   return {
     id: makeId('ae'),
+    sourceRoutineExerciseId: exercise.id,
+    modificationType: 'planned',
     exerciseId: exercise.exerciseId,
     name: exercise.name,
     muscle: exercise.muscle,
     notes: '',
-    sets: exercise.sets.map(set => ({
-      id: makeId('as'),
-      type: set.type,
-      weight: String(set.weight),
-      reps: String(set.repsMin),
-      targetRepsMin: set.repsMin,
-      targetRepsMax: set.repsMax,
-      rpe: set.rpe == null ? '' : String(set.rpe),
-      rir: set.rir == null ? '' : String(set.rir),
-      completed: false,
-    })),
+    sets: exercise.sets.map((set, index) => {
+      const previous = previousSetPerformance(history, exercise.exerciseId, index);
+      return {
+        id: makeId('as'),
+        sourceRoutineSetId: set.id,
+        modificationType: 'planned',
+        type: set.type,
+        weight: previous?.weight ?? String(set.weight),
+        reps: previous?.reps ?? String(set.repsMin),
+        targetRepsMin: set.repsMin,
+        targetRepsMax: set.repsMax,
+        rpe: set.rpe == null ? '' : String(set.rpe),
+        rir: set.rir == null ? '' : String(set.rir),
+        completed: false,
+      };
+    }),
   };
 }
 
@@ -70,6 +83,7 @@ function isUnmodifiedSeedData(data: PersistedData) {
   return routineIds === [...SEED_ROUTINE_IDS].sort().join(',')
     && data.history.length === 0
     && data.tombstones.length === 0
+    && data.profile.displayName === ''
     && data.profile.bodyWeight === '85' && data.profile.height === '178'
     && data.profile.goal === GOAL_OPTIONS[0] && data.profile.level === DEFAULT_BLOCK
     && data.profile.defaultRestSeconds === 180;
@@ -85,6 +99,7 @@ function validEffortInput(field: SetField, value: string) {
 export function AppStoreProvider({ children }: PropsWithChildren) {
   const [data, setData] = useState<PersistedData>(() => freshDefaultData());
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [lastPrEvent, setLastPrEvent] = useState<PrEvent | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>('local');
   const [cloudReady, setCloudReady] = useState(false);
@@ -203,6 +218,37 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
     return routine;
   };
 
+  const updateRoutine = (id: string, input: CreateRoutineInput): Routine => {
+    const existing = data.routines.find(item => item.id === id);
+    const timestamp = new Date().toISOString();
+    const exercises = input.exercises.flatMap(item => {
+      const exercise = EXERCISES.find(candidate => candidate.id === item.exerciseId);
+      if (!exercise) return [];
+      return [{
+        id: makeId('re'),
+        exerciseId: item.exerciseId,
+        name: exercise.name,
+        muscle: exercise.muscle,
+        sets: item.sets.map(set => {
+          const range = normalizeRepRange(set.repsMin, set.repsMax);
+          return { ...set, id: makeId('rs'), repsMin: range.min, repsMax: range.max };
+        }),
+      }];
+    });
+    const routine: Routine = {
+      id,
+      name: input.name.trim(),
+      day: input.day,
+      effortMode: input.effortMode,
+      exercises,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+      blockWeekId: existing?.blockWeekId ?? null,
+    };
+    setData(current => ({ ...current, routines: current.routines.map(item => item.id === id ? routine : item) }));
+    return routine;
+  };
+
   const duplicateRoutine = (id: string) => setData(current => {
     const source = current.routines.find(item => item.id === id);
     if (!source || current.routines.length >= 7) return current;
@@ -238,7 +284,23 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       restSeconds: data.profile.defaultRestSeconds,
       startedAt: Date.now(),
       notes: '',
-      exercises: routine?.exercises.map(toActiveExercise) ?? [],
+      blockWeekId: routine?.blockWeekId ?? null,
+      exercises: routine?.exercises.map(exercise => toActiveExercise(exercise, data.history)) ?? [],
+    });
+  };
+
+  const startWorkoutFromRoutine = (routine: Routine, context?: { blockId?: string | null; blockWeekId?: string | null }) => {
+    setActiveSession({
+      id: makeId('session'),
+      routineId: routine.id,
+      routineName: routine.name,
+      effortMode: routine.effortMode,
+      restSeconds: data.profile.defaultRestSeconds,
+      startedAt: Date.now(),
+      notes: '',
+      blockId: context?.blockId ?? null,
+      blockWeekId: context?.blockWeekId ?? routine.blockWeekId ?? null,
+      exercises: routine.exercises.map(exercise => toActiveExercise(exercise, data.history)),
     });
   };
 
@@ -250,7 +312,11 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       ...current,
       exercises: [...current.exercises, {
         id: makeId('ae'), exerciseId, name: exercise.name, muscle: exercise.muscle, notes: '',
-        sets: [1, 2, 3].map(() => ({ id: makeId('as'), type: 'working', weight: '0', reps: '5', targetRepsMin: 5, targetRepsMax: 5, rpe: '', rir: '', completed: false })),
+        modificationType: 'added',
+        sets: [1, 2, 3].map((_, index) => {
+          const previous = previousSetPerformance(data.history, exerciseId, index);
+          return { id: makeId('as'), type: 'working', weight: previous?.weight ?? '0', reps: previous?.reps ?? '5', targetRepsMin: 5, targetRepsMax: 5, rpe: '', rir: '', completed: false, modificationType: 'added' as const };
+        }),
       }],
     };
   });
@@ -261,7 +327,11 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       ...current,
       exercises: current.exercises.map(exercise => exercise.id !== exerciseId ? exercise : ({
         ...exercise,
-        sets: exercise.sets.map(set => set.id === setId ? { ...set, [field]: value } : set),
+        sets: exercise.sets.map(set => set.id === setId ? {
+          ...set,
+          [field]: value,
+          modificationType: field !== 'weight' && set.sourceRoutineSetId ? 'edited' : set.modificationType,
+        } : set),
       })),
     }) : current);
   };
@@ -273,13 +343,37 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
 
   const updateActiveSessionNotes = (notes: string) => setActiveSession(current => current ? { ...current, notes } : current);
 
-  const toggleActiveSet = (exerciseId: string, setId: string) => setActiveSession(current => current ? ({
-    ...current,
-    exercises: current.exercises.map(exercise => exercise.id !== exerciseId ? exercise : ({
-      ...exercise,
-      sets: exercise.sets.map(set => set.id !== setId ? set : ({ ...set, completed: !set.completed, completedAt: !set.completed ? new Date().toISOString() : undefined })),
-    })),
-  }) : current);
+  const toggleActiveSet = (exerciseId: string, setId: string) => {
+    const exercise = activeSession?.exercises.find(item => item.id === exerciseId);
+    const set = exercise?.sets.find(item => item.id === setId);
+    if (exercise && set && set.type === 'working' && !set.completed) {
+      const hasPriorSession = data.history.some(session => session.exercises.some(item => item.exerciseId === exercise.exerciseId));
+      if (hasPriorSession) {
+        const weight = Number(set.weight) || 0;
+        const reps = Number(set.reps) || 0;
+        const rpe = set.rpe.trim() ? Number(set.rpe) : null;
+        const heaviest = heaviestWeight(data.history, exercise.exerciseId);
+        const repRecord = bestByRepCount(data.history, exercise.exerciseId).find(item => item.reps === reps);
+        if (heaviest && weight > heaviest.weight) {
+          setLastPrEvent({ exerciseName: exercise.name, kind: 'weight' });
+        } else if (reps > 0 && (!repRecord || weight > repRecord.weight)) {
+          setLastPrEvent({ exerciseName: exercise.name, kind: 'reps' });
+        } else if (rpe != null) {
+          const bestRpe = bestRpeAtOrAbove(data.history, exercise.exerciseId, weight, reps);
+          if (bestRpe != null && rpe < bestRpe) {
+            setLastPrEvent({ exerciseName: exercise.name, kind: 'rpe' });
+          }
+        }
+      }
+    }
+    setActiveSession(current => current ? ({
+      ...current,
+      exercises: current.exercises.map(item => item.id !== exerciseId ? item : ({
+        ...item,
+        sets: item.sets.map(s => s.id !== setId ? s : ({ ...s, completed: !s.completed, completedAt: !s.completed ? new Date().toISOString() : undefined })),
+      })),
+    }) : current);
+  };
 
   const addActiveSet = (exerciseId: string) => setActiveSession(current => current ? ({
     ...current,
@@ -298,6 +392,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
           rpe: '',
           rir: '',
           completed: false,
+          modificationType: 'added',
         }],
       };
     }),
@@ -318,10 +413,22 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
 
   const finishWorkout = () => {
     if (!activeSession) return null;
-    const exercises = activeSession.exercises.map(exercise => ({ ...exercise, notes: exercise.notes.trim() }));
+    const exercises = activeSession.exercises.map(exercise => ({
+      ...exercise,
+      notes: exercise.notes.trim(),
+      sets: exercise.sets.map(set => set.sourceRoutineSetId && !set.completed && set.modificationType === 'planned'
+        ? { ...set, modificationType: 'skipped' as const }
+        : set),
+    }));
     const completed = exercises.flatMap(exercise => exercise.sets).filter(set => set.completed);
+    const athleteModified = exercises.some(exercise => exercise.modificationType !== 'planned'
+      || exercise.sets.some(set => set.modificationType !== 'planned'));
     const history: WorkoutHistory = {
       id: activeSession.id,
+      routineId: activeSession.routineId ?? null,
+      blockId: activeSession.blockId ?? null,
+      blockWeekId: activeSession.blockWeekId ?? null,
+      athleteModified,
       routineName: activeSession.routineName,
       effortMode: activeSession.effortMode,
       date: new Date().toISOString(),
@@ -336,6 +443,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
     return history;
   };
 
+  const clearPrEvent = useCallback(() => setLastPrEvent(null), []);
   const cancelWorkout = () => setActiveSession(null);
   const updateProfile = (profile: Profile) => setData(current => ({ ...current, profile: { ...profile, updatedAt: new Date().toISOString() } }));
   const resetAfterSignOut = () => {
@@ -353,8 +461,8 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
   };
 
   const value: Store = {
-    ...data, hydrated, activeSession, exercises: EXERCISES, syncState, initializeCloudSync, syncNow,
-    createRoutine, duplicateRoutine, deleteRoutine, startWorkout, addExerciseToActive, updateActiveSet,
+    ...data, hydrated, activeSession, exercises: EXERCISES, syncState, lastPrEvent, clearPrEvent, initializeCloudSync, syncNow,
+    createRoutine, updateRoutine, duplicateRoutine, deleteRoutine, startWorkout, startWorkoutFromRoutine, addExerciseToActive, updateActiveSet,
     updateActiveExerciseNotes, updateActiveSessionNotes, toggleActiveSet, addActiveSet, finishWorkout,
     removeActiveSet, updateActiveSessionSettings, cancelWorkout, updateProfile, resetAfterSignOut,
   };
